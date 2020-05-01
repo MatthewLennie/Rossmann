@@ -1,6 +1,9 @@
 import pandas as pd
 import sklearn.impute
 import numpy as np
+import torch
+from sklearn.preprocessing import MinMaxScaler
+
 cat_vars = ['Store', 'DayOfWeek', 'Year', 'Month', 'Day', 'StateHoliday', 'CompetitionMonthsOpen',
             'Promo2Weeks', 'StoreType', 'Assortment', 'PromoInterval', 'CompetitionOpenSinceYear', 'Promo2SinceYear',
             'State', 'Week', 'Events', 'Is_quarter_end_DE', 'Is_quarter_start', 'WindDirDegrees', 'Is_quarter_start_DE', 'Is_month_end',
@@ -22,7 +25,7 @@ weather_vars = ['Max_TemperatureC', 'Mean_TemperatureC',
                 'Max_Gust_SpeedKm_h', 'Precipitationmm', 'CloudCover',
                 'WindDirDegrees']
 
-output_file_name = "joined_cleaned.pkl"
+output_file_name = "./data/joined_cleaned.pkl"
 def data_clean(joined):
     """[function currently does basic na forward filling and conversion of variables to useful types. 
     I also drop a bunch of columns that either are entirely null or duplciate columns]
@@ -63,11 +66,39 @@ def data_clean(joined):
     joined[cont_vars] = joined[cont_vars].astype('float')
     return joined
 
+from torch.utils.data.dataset import Dataset
 
-if __name__ == "main":
+class MyCustomDataset(Dataset):
+    """[puts data into a useful format to be used by the dataloader]
+
+    Arguments:
+        Dataset {[]} -- [description]
+    """
+    def __init__(self, df,cont_vars,cat_vars):
+        # reading data, transforms etc.. 
+        split_train = int(df.shape[0]*0.8)
+        split_valid = df.shape[0]-split_train
+        train, valid = torch.utils.data.random_split(df,[split_train,split_valid])
+        scaler = MinMaxScaler()
+        df.loc[train.indices,cont_vars] = scaler.fit_transform(df.loc[train.indices,cont_vars])
+        df.loc[valid.indices,cont_vars] = scaler.transform(df.loc[valid.indices,cont_vars])
+        print(train)
+    def __getitem__(self, index):
+        # returns the input and output
+        raise(NotImplementedError)
+        return None
+
+    def __len__(self):
+        raise(NotImplementedError)
+        return 1 # of how many examples(images?) you have
+
+if __name__ == "__main__":
     # just used the joined dataframes
     joined = pd.read_pickle('./data/joined')
     # joined_test doesn't contain customers or sales. they are the predicted variables. 
     joined_test = pd.read_pickle('./data/joined_test')
     joined = data_clean(joined)
+
     joined.to_pickle(output_file_name)
+    data = MyCustomDataset(joined,cont_vars,cat_vars)
+    print("asdf")
