@@ -158,7 +158,8 @@ def data_clean(joined):
     if "Id" in joined.keys():
         joined.drop("Id", axis=1, inplace=True)
 
-    # check the keys. Make sure that we don't have a miss match between keys in list and dataframe.
+    # check the keys. Make sure that we don't have a miss match
+    # between keys in list and dataframe.
     a = set(joined.keys())
     total_keys = cat_vars.copy()
     total_keys.extend(cont_vars)
@@ -239,7 +240,8 @@ class RossmanDataset(Dataset):
 
     def __getitem__(self, index):
         # returns the input and output
-        return self.data.loc[index, self.x_cols], self.data.loc[index, self.Y_cols]
+        return (self.data.loc[index, self.x_cols],)
+        self.data.loc[index, self.Y_cols]
 
     def __len__(self):
         return self.length  # of how many examples(images?) you have
