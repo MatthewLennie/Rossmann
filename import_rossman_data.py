@@ -17,7 +17,6 @@ cat_vars = [
     "Promo2Weeks",
     "StoreType",
     "Assortment",
-    "PromoInterval",
     "CompetitionOpenSinceYear",
     "Promo2SinceYear",
     "State",
@@ -36,7 +35,6 @@ cat_vars = [
     "Is_year_end_DE",
     "Dayofweek",
     "Is_month_start",
-    "StateName",
 ]
 
 cont_vars = [
@@ -236,12 +234,16 @@ class RossmanDataset(Dataset):
 
         self.data.reset_index(inplace=True)
         self.data.drop(["index"], inplace=True, axis=1)
+        self.x_data_cat = torch.tensor(self.data[cat_vars].values, dtype=torch.uint8)
+        self.x_data_cont = torch.tensor(
+            self.data[cont_vars].values, dtype=torch.float32
+        )
+        self.Y_data = torch.tensor(self.data[self.Y_cols].values)
         self.length = self.data.shape[0]
 
     def __getitem__(self, index):
         # returns the input and output
-        return (self.data.loc[index, self.x_cols],)
-        self.data.loc[index, self.Y_cols]
+        return self.x_data_cat[index], self.x_data_cont[index], self.Y_data[index]
 
     def __len__(self):
         return self.length  # of how many examples(images?) you have
