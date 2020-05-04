@@ -5,20 +5,16 @@ import numpy as np
 import torch
 from sklearn.preprocessing import MinMaxScaler
 import pickle
+from typing import List
 
 cat_vars = [
     "Store",
     "DayOfWeek",
-    "Year",
-    "Month",
-    "Day",
     "StateHoliday",
     "CompetitionMonthsOpen",
     "Promo2Weeks",
     "StoreType",
     "Assortment",
-    "CompetitionOpenSinceYear",
-    "Promo2SinceYear",
     "State",
     "Week",
     "Events",
@@ -71,6 +67,8 @@ cont_vars = [
     "Elapsed",
     "Max_VisibilityKm",
     "CompetitionOpenSinceMonth",
+    "CompetitionOpenSinceYear",
+    "Promo2SinceYear",
 ]
 
 weather_vars = [
@@ -100,7 +98,7 @@ weather_vars = [
 output_file_name = "./data/joined_cleaned.pkl"
 
 
-def data_clean(joined):
+def data_clean(joined: pd.DataFrame) -> pd.DataFrame:
     """[function currently does basic na forward 
     filling and conversion of variables to useful types. 
     I also drop a bunch of columns that either are entirely null or 
@@ -124,6 +122,9 @@ def data_clean(joined):
 
     #  change text data into categories, as codes.
     joined["Events"] = joined["Events"].astype("category").cat.codes + 1
+    joined["Store"] = joined["Store"] - 1
+    joined["DayOfWeek"] = joined["DayOfWeek"] - 1
+    joined["Week"] = joined["Week"] - 1
     joined["Assortment"] = joined["Assortment"].astype("category").cat.codes
     joined["State"] = joined["State"].astype("category").cat.codes
     joined["WindDirDegrees"] = joined["WindDirDegrees"].astype("category").cat.codes
@@ -131,6 +132,9 @@ def data_clean(joined):
     joined.drop(
         [
             "Promo2Since",
+            "Year",
+            "Month",
+            "Day",
             "PromoInterval",
             "StateName",
             "file_DE",
@@ -201,7 +205,14 @@ class RossmanDataset(Dataset):
         with open(output_file, "wb") as output:
             pickle.dump(self, output, pickle.HIGHEST_PROTOCOL)
 
-    def __init__(self, df, cont_vars, cat_vars, indices, scaler=MinMaxScaler()):
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        cont_vars: List[str],
+        cat_vars: List[str],
+        indices: List[int],
+        scaler=MinMaxScaler(),
+    ):
 
         # reading data, transforms etc..
         # column lists
@@ -234,7 +245,7 @@ class RossmanDataset(Dataset):
 
         self.data.reset_index(inplace=True)
         self.data.drop(["index"], inplace=True, axis=1)
-        self.x_data_cat = torch.tensor(self.data[cat_vars].values, dtype=torch.uint8)
+        self.x_data_cat = torch.tensor(self.data[cat_vars].values, dtype=torch.int)
         self.x_data_cont = torch.tensor(
             self.data[cont_vars].values, dtype=torch.float32
         )
