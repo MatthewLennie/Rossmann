@@ -36,7 +36,6 @@ cat_vars = [
 cont_vars = [
     "Sales",
     "Promo2SinceWeek",
-    "CompetitionDistance",
     "Max_TemperatureC",
     "Mean_TemperatureC",
     "Min_TemperatureC",
@@ -153,6 +152,7 @@ def data_clean(joined: pd.DataFrame) -> pd.DataFrame:
             "CompetitionOpenSince",
             "Date_DE",
             "Elapsed_DE",
+            "CompetitionDistance",
         ],
         axis=1,
         inplace=True,
@@ -176,6 +176,7 @@ def data_clean(joined: pd.DataFrame) -> pd.DataFrame:
 
     # change to floats.
     joined[cont_vars] = joined[cont_vars].astype("float")
+    joined.dropna(0, inplace=True)
     return joined
 
 
@@ -229,8 +230,8 @@ class RossmanDataset(Dataset):
             self.data = df.loc[indices, :].copy()
 
             # fit!!! and transform the continuous variables.
-            self.data.loc[:, cont_vars] = self.scaler.fit_transform(
-                self.data.loc[:, cont_vars]
+            self.data.loc[:, cont_vars + self.Y_cols] = self.scaler.fit_transform(
+                self.data.loc[:, cont_vars + self.Y_cols]
             )
 
         else:
@@ -239,7 +240,7 @@ class RossmanDataset(Dataset):
             self.data = df.loc[indices, :].copy()
 
             # transform the continuous variables.
-            self.data.loc[:, cont_vars] = self.scaler.transform(
+            self.data.loc[:, cont_vars + self.Y_cols] = self.scaler.transform(
                 self.data.loc[:, cont_vars]
             )
 
@@ -249,7 +250,7 @@ class RossmanDataset(Dataset):
         self.x_data_cont = torch.tensor(
             self.data[cont_vars].values, dtype=torch.float32
         )
-        self.Y_data = torch.tensor(self.data[self.Y_cols].values)
+        self.Y_data = torch.tensor(self.data[self.Y_cols].values, dtype=torch.float32)
         self.length = self.data.shape[0]
 
     def __getitem__(self, index):
