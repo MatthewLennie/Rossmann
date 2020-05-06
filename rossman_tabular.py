@@ -82,6 +82,7 @@ class learner:
         # create model skeleton
         self.model = tabular_rossman_model(embedding_sizes, len(rossman.cont_vars))
         self.initialize_optimizer()
+        # self.schedule = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer,T_max = 200)
         self.loss = torch.nn.MSELoss()
 
         # transfer everything to the device
@@ -93,13 +94,17 @@ class learner:
         self.optim = torch.optim.Adam(self.model.parameters())
         # TODO lr scheduler.
 
-    def training_step(self, input_data: List[torch.tensor]) -> torch.tensor:
+    def training_step(
+        self, input_data: List[torch.tensor], log_grads: bool = False
+    ) -> torch.tensor:
         cat = input_data[0].to(self.device)
         cont = input_data[1].to(self.device)
         predictions = self.model.forward(cat, cont)
         # TODO include both terms in loss
         batch_loss = self.loss(predictions[:, 0], input_data[2][:, 0].to(self.device))
         batch_loss.backward()
+        if log_grads:
+            self.dump_model_parameters_to_log()
         self.optim.step()
         self.optim.zero_grad()
         return batch_loss
@@ -117,13 +122,14 @@ class learner:
 
     def training_loop(self, epochs: int):
         for current_epoch in range(epochs):
+            log_grads = True
             for batch in self.train_data:
-                training_batch_loss = self.training_step(batch)
-
+                training_batch_loss = self.training_step(batch, log_grads)
+                log_grads = False
             # perform tensorboard logging.
             self.writer.add_scalar("Training_Loss", training_batch_loss, current_epoch)
             self.validation_set(current_epoch)
-            self.dump_model_parameters_to_log()
+
         return None
 
     def validation_set(self, current_epoch: int):
@@ -161,18 +167,18 @@ if __name__ == "__main__":
 
     embedding_sizes = get_embedding_sizes(train_data_obj)
 
-    batch_size = 500000
+    batch_size = 5000000
     train_data_loader = torch.utils.data.DataLoader(
-        train_data_obj, batch_size=batch_size,  ##pin_memory=True
+        train_data_obj, batch_size=batch_size, pin_memory=True
     )
     valid_data_loader = torch.utils.data.DataLoader(
-        valid_data_obj, batch_size=batch_size,  ##pin_memory=True
+        valid_data_obj, batch_size=batch_size, pin_memory=True
     )
 
     # model = tabular_rossman_model(embedding_sizes, len(rossman.cont_vars))
 
     rossman_learner = learner(train_data_loader, valid_data_loader)
-    rossman_learner.training_loop(300)
+    rossman_learner.training_loop(30000)
 
     # for i in data_loader:
     #     answer = model.forward(i[0], i[1])
