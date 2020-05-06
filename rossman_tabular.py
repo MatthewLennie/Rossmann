@@ -82,7 +82,9 @@ class learner:
         # create model skeleton
         self.model = tabular_rossman_model(embedding_sizes, len(rossman.cont_vars))
         self.initialize_optimizer()
-        # self.schedule = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer,T_max = 200)
+        self.schedule = torch.optim.lr_scheduler.CosineAnnealingLR(
+            self.optim, T_max=200
+        )
         self.loss = torch.nn.MSELoss()
 
         # transfer everything to the device
@@ -91,7 +93,8 @@ class learner:
         return None
 
     def initialize_optimizer(self):
-        self.optim = torch.optim.Adam(self.model.parameters())
+        self.optim = torch.optim.Adam(self.model.parameters(), lr=0.5)
+        self.schedule = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=10)
         # TODO lr scheduler.
 
     def training_step(
@@ -105,6 +108,7 @@ class learner:
         batch_loss.backward()
         if log_grads:
             self.dump_model_parameters_to_log()
+        self.schedule.step()
         self.optim.step()
         self.optim.zero_grad()
         return batch_loss
@@ -128,8 +132,12 @@ class learner:
                 log_grads = False
             # perform tensorboard logging.
             self.writer.add_scalar("Training_Loss", training_batch_loss, current_epoch)
+            self.writer.add_scalar(
+                "learning_rate", self.optim.param_groups[0]["lr"], current_epoch
+            )
             self.validation_set(current_epoch)
-
+            if self.schedule._step_count % 10 == 0:
+                self.initialize_optimizer()
         return None
 
     def validation_set(self, current_epoch: int):
@@ -142,6 +150,15 @@ class learner:
             losses.append(batch_loss)
         self.writer.add_scalar(
             "Validation_Loss", torch.stack(losses).mean(), current_epoch
+        )
+        loss_percentage = (predictions[:, 0] - batch[2][:, 0].to(self.device)) / batch[
+            2
+        ][:, 0].to(self.device).abs()
+
+        self.writer.add_histogram(
+            "Losses_percentages",
+            (predictions[:, 0] - batch[2][:, 0].to(self.device))
+            / batch[2][:, 0].to(self.device).abs(),
         )
         return None
 
@@ -167,7 +184,7 @@ if __name__ == "__main__":
 
     embedding_sizes = get_embedding_sizes(train_data_obj)
 
-    batch_size = 5000000
+    batch_size = 5
     train_data_loader = torch.utils.data.DataLoader(
         train_data_obj, batch_size=batch_size, pin_memory=True
     )
