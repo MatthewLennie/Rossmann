@@ -42,8 +42,12 @@ class tabular_rossman_model(torch.nn.Module):
         self.linear_layer3 = torch.nn.Linear(5, 2)
         self.Dropout1 = torch.nn.Dropout()
         self.squash = torch.nn.Sigmoid()
+        self.batch = 0
 
     def forward(self, cat_data: torch.tensor, cont_data: torch.tensor) -> torch.tensor:
+        assert cat_data.device.type == "cuda"
+        self.batch += 1
+        logger.debug("count: {}".format(self.batch))
         cat_outputs = [
             emb(cat_data[:, idx].long())
             for idx, emb in enumerate(self.CategoricalEmbeddings)
@@ -51,9 +55,14 @@ class tabular_rossman_model(torch.nn.Module):
         cat_outputs = self.EmbeddingDropout(torch.cat(cat_outputs, 1))
 
         l1 = self.Dropout1(
-            self.ReLU1(self.linear_input_layer(torch.cat([cat_outputs, cont_data], 1)))
+            self.ReLU1(
+                self.linear_input_layer(
+                    torch.cat([cat_outputs, self.Batch1(cont_data)], 1)
+                )
+            )
         )
         l2 = self.Dropout2(self.ReLU2(self.linear_layer2(self.ReLU1(l1))))
+        l2 = self.Batch2(l2)
         l3 = self.linear_layer3(self.ReLU2(l2))
         return self.squash(l3)
 
@@ -76,18 +85,23 @@ class learner:
         self.loss = torch.nn.MSELoss()
 
         # transfer everything to the device
-        # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        # self.train_data.to
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.model.to(self.device)
         return None
 
     def initialize_optimizer(self):
         self.optim = torch.optim.Adam(self.model.parameters())
         # TODO lr scheduler.
 
-    def training_step(self, input_data: torch.utils.data.DataLoader) -> torch.tensor:
-        predictions = self.model.forward(input_data[0], input_data[1])
-        batch_loss = self.loss(predictions[:, 0], input_data[2][:, 0])
+    def training_step(self, input_data: List[torch.tensor]) -> torch.tensor:
+        cat = input_data[0].to(self.device)
+        cont = input_data[1].to(self.device)
+        predictions = self.model.forward(cat, cont)
+        # TODO include both terms in loss
+        batch_loss = self.loss(predictions[:, 0], input_data[2][:, 0].to(self.device))
         batch_loss.backward()
+        self.optim.step()
+        self.optim.zero_grad()
         return batch_loss
 
     def dump_model_parameters_to_log(self):
@@ -115,11 +129,13 @@ class learner:
     def validation_set(self, current_epoch: int):
         losses = []
         for batch in self.valid_data:
-            predictions = self.model.forward(batch[0], batch[1])
-            batch_loss = self.loss(predictions[:, 0], batch[2][:, 0])
+            predictions = self.model.forward(
+                batch[0].to(self.device), batch[1].to(self.device)
+            )
+            batch_loss = self.loss(predictions[:, 0], batch[2][:, 0].to(self.device))
             losses.append(batch_loss)
         self.writer.add_scalar(
-            "Validation Loss", torch.stack(losses).mean(), current_epoch
+            "Validation_Loss", torch.stack(losses).mean(), current_epoch
         )
         return None
 
@@ -145,12 +161,12 @@ if __name__ == "__main__":
 
     embedding_sizes = get_embedding_sizes(train_data_obj)
 
-    batch_size = 50000
+    batch_size = 500000
     train_data_loader = torch.utils.data.DataLoader(
-        train_data_obj, batch_size=batch_size, pin_memory=True
+        train_data_obj, batch_size=batch_size,  ##pin_memory=True
     )
     valid_data_loader = torch.utils.data.DataLoader(
-        valid_data_obj, batch_size=batch_size, pin_memory=True
+        valid_data_obj, batch_size=batch_size,  ##pin_memory=True
     )
 
     # model = tabular_rossman_model(embedding_sizes, len(rossman.cont_vars))
