@@ -1,11 +1,11 @@
 import torch
-import pandas as pd
 import import_rossman_data as rossman
 from import_rossman_data import RossmanDataset
 from typing import List
 from torch.utils.tensorboard import SummaryWriter
 import random
-import coloredlogs, logging
+import coloredlogs
+import logging
 
 
 class tabular_rossman_model(torch.nn.Module):
@@ -16,10 +16,12 @@ class tabular_rossman_model(torch.nn.Module):
     """
 
     def __init__(self, embedding_sizes: List[int], cont_vars_sizes: int):
-        """[Sets up the network. Has Categorical embeddings for categorical input and simple input for linear layers]
+        """[Sets up the network. Has Categorical embeddings for
+        categorical input and simple input for linear layers]
 
         Args:
-            embedding_sizes (List[int]): [list of the cardinalities of the categorical variables]
+            embedding_sizes (List[int]):
+            [list of the cardinalities of the categorical variables]
             cont_vars_sizes (int): [length of the continuous variables.]
         """
         super(tabular_rossman_model, self).__init__()
@@ -34,7 +36,9 @@ class tabular_rossman_model(torch.nn.Module):
 
         # convert the list of embeddings to a ModuleList so that PyTorch finds
         # it as a paramater for backpropagation...
-        self.CategoricalEmbeddings = torch.nn.ModuleList(self.CategoricalEmbeddings)
+        self.CategoricalEmbeddings = torch.nn.ModuleList(
+            self.CategoricalEmbeddings
+        )
         self.EmbeddingDropout = torch.nn.Dropout()
 
         # build linear layers for continuous variables and cat embeddings
@@ -57,7 +61,9 @@ class tabular_rossman_model(torch.nn.Module):
         self.squash = torch.nn.Sigmoid()
         self.batch = 0
 
-    def forward(self, cat_data: torch.tensor, cont_data: torch.tensor) -> torch.tensor:
+    def forward(
+        self, cat_data: torch.tensor, cont_data: torch.tensor
+    ) -> torch.tensor:
         """[forward propagation, categorical and continuous data handled seperately]
 
         Args:
@@ -115,7 +121,9 @@ class learner:
         self.valid_data = valid_data
 
         # create model skeleton
-        self.model = tabular_rossman_model(embedding_sizes, len(rossman.cont_vars))
+        self.model = tabular_rossman_model(
+            embedding_sizes, len(rossman.cont_vars)
+        )
         self.initialize_optimizer()
         self.schedule = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optim, T_max=200
@@ -123,16 +131,20 @@ class learner:
         self.loss = torch.nn.MSELoss()
 
         # transfer everything to the device
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device(
+            "cuda:0" if torch.cuda.is_available() else "cpu"
+        )
         self.model.to(self.device)
         return None
 
     def initialize_optimizer(self):
-        """[creates a clean optimizer and scheduler. 
+        """[creates a clean optimizer and scheduler.
         Can by improved by providing resetting functionality, works for now]
         """
         self.optim = torch.optim.Adam(self.model.parameters(), lr=0.005)
-        self.schedule = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=10)
+        self.schedule = torch.optim.lr_scheduler.CosineAnnealingLR(
+            self.optim, T_max=10
+        )
 
     def exp_rmspe(
         self, pred: torch.tensor, targ: torch.tensor, log: bool = False
@@ -209,9 +221,13 @@ class learner:
                 training_batch_loss = self.training_step(batch, log_grads)
                 log_grads = False
             # perform tensorboard logging.
-            self.writer.add_scalar("Training_Loss", training_batch_loss, current_epoch)
             self.writer.add_scalar(
-                "learning_rate", self.optim.param_groups[0]["lr"], current_epoch
+                "Training_Loss", training_batch_loss, current_epoch
+            )
+            self.writer.add_scalar(
+                "learning_rate",
+                self.optim.param_groups[0]["lr"],
+                current_epoch,
             )
             self.validation_set(current_epoch)
             if self.schedule._step_count % 10 == 0:
@@ -257,7 +273,9 @@ def get_embedding_sizes(train_data_obj: RossmanDataset) -> List[int]:
     # Get embedding Layer sizes based on unique categories.
     # Potential bug if rare classes don't appear in the training set.
     for key in rossman.cat_vars:
-        embedding_sizes.append(max([len(train_data_obj.data[key].unique()), 2]))
+        embedding_sizes.append(
+            max([len(train_data_obj.data[key].unique()), 2])
+        )
     return embedding_sizes
 
 

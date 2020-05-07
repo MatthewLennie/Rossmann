@@ -1,7 +1,5 @@
 from torch.utils.data.dataset import Dataset
 import pandas as pd
-import sklearn.impute
-import numpy as np
 import torch
 from sklearn.preprocessing import MinMaxScaler
 import pickle
@@ -98,26 +96,28 @@ output_file_name = "./data/joined_cleaned.pkl"
 
 
 def data_clean(joined: pd.DataFrame) -> pd.DataFrame:
-    """[function currently does basic na forward 
-    filling and conversion of variables to useful types. 
-    I also drop a bunch of columns that either are entirely null or 
+    """[function currently does basic na forward
+    filling and conversion of variables to useful types.
+    I also drop a bunch of columns that either are entirely null or
     duplciate columns, the data source seems to be a weirdly processed]
 
     Arguments:
-        joined {df} -- [original df from kaggle download 
+        joined {df} -- [original df from kaggle download
         https://www.kaggle.com/init27/fastai-v3-rossman-data-clean]
 
     Returns:
         [df] -- [cleaned df]
     """
-    joined.loc[:, weather_vars] = joined.loc[:, weather_vars].fillna(method="ffill")
-    weather_vars.append("Events")
+    joined.loc[:, weather_vars] = joined.loc[:, weather_vars].fillna(
+        method="ffill"
+    )
 
+    weather_vars.append("Events")
     # some of the initial Max_Gust_Speed Data was missing
     # so I filled with the Max_wind Speed.
-    joined.loc[joined["Max_Gust_SpeedKm_h"].isna(), "Max_Gust_SpeedKm_h"] = joined.loc[
-        joined["Max_Gust_SpeedKm_h"].isna(), "Max_Wind_SpeedKm_h"
-    ]
+    joined.loc[
+        joined["Max_Gust_SpeedKm_h"].isna(), "Max_Gust_SpeedKm_h"
+    ] = joined.loc[joined["Max_Gust_SpeedKm_h"].isna(), "Max_Wind_SpeedKm_h"]
 
     #  change text data into categories, as codes.
     joined["Events"] = joined["Events"].astype("category").cat.codes + 1
@@ -126,7 +126,9 @@ def data_clean(joined: pd.DataFrame) -> pd.DataFrame:
     joined["Week"] = joined["Week"] - 1
     joined["Assortment"] = joined["Assortment"].astype("category").cat.codes
     joined["State"] = joined["State"].astype("category").cat.codes
-    joined["WindDirDegrees"] = joined["WindDirDegrees"].astype("category").cat.codes
+    joined["WindDirDegrees"] = (
+        joined["WindDirDegrees"].astype("category").cat.codes
+    )
     joined["StoreType"] = joined["StoreType"].astype("category").cat.codes
     joined.drop(
         [
@@ -230,7 +232,9 @@ class RossmanDataset(Dataset):
             self.data = df.loc[indices, :].copy()
 
             # fit!!! and transform the continuous variables.
-            self.data.loc[:, cont_vars + self.Y_cols] = self.scaler.fit_transform(
+            self.data.loc[
+                :, cont_vars + self.Y_cols
+            ] = self.scaler.fit_transform(
                 self.data.loc[:, cont_vars + self.Y_cols]
             )
 
@@ -246,16 +250,24 @@ class RossmanDataset(Dataset):
 
         self.data.reset_index(inplace=True)
         self.data.drop(["index"], inplace=True, axis=1)
-        self.x_data_cat = torch.tensor(self.data[cat_vars].values, dtype=torch.int)
+        self.x_data_cat = torch.tensor(
+            self.data[cat_vars].values, dtype=torch.int
+        )
         self.x_data_cont = torch.tensor(
             self.data[cont_vars].values, dtype=torch.float32
         )
-        self.Y_data = torch.tensor(self.data[self.Y_cols].values, dtype=torch.float32)
+        self.Y_data = torch.tensor(
+            self.data[self.Y_cols].values, dtype=torch.float32
+        )
         self.length = self.data.shape[0]
 
     def __getitem__(self, index):
         # returns the input and output
-        return self.x_data_cat[index], self.x_data_cont[index], self.Y_data[index]
+        return (
+            self.x_data_cat[index],
+            self.x_data_cont[index],
+            self.Y_data[index],
+        )
 
     def __len__(self):
         return self.length  # of how many examples(images?) you have
@@ -279,7 +291,9 @@ if __name__ == "__main__":
     # train valid splitting
     split_train = int(joined.shape[0] * 0.8)
     split_valid = joined.shape[0] - split_train
-    train, valid = torch.utils.data.random_split(joined, [split_train, split_valid])
+    train, valid = torch.utils.data.random_split(
+        joined, [split_train, split_valid]
+    )
 
     # create and save the training set
     train_data = RossmanDataset(joined, cont_vars, cat_vars, train.indices)
