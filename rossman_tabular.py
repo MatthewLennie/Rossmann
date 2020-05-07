@@ -28,7 +28,7 @@ class tabular_rossman_model(torch.nn.Module):
 
         # build embeddings for categories
         self.CategoricalEmbeddings = []
-        self.embedding_depth = 10  # hard coded for now.
+        self.embedding_depth = 6  # hard coded for now.
         for i in embedding_sizes:
             self.CategoricalEmbeddings.append(
                 torch.nn.Embedding(i, self.embedding_depth)
@@ -126,7 +126,7 @@ class learner:
         )
         self.initialize_optimizer()
         self.schedule = torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.optim, T_max=200
+            self.optim, T_max=10
         )
         self.loss = torch.nn.MSELoss()
 
@@ -194,7 +194,7 @@ class learner:
         return batch_loss
 
     def dump_model_parameters_to_log(self):
-        """[summary]
+        """[throws each of the model parameters into the log]
         """
         for param in self.model.named_parameters():
 
@@ -260,7 +260,8 @@ class learner:
 
 
 def get_embedding_sizes(train_data_obj: RossmanDataset) -> List[int]:
-    """[Small helper function just to find the cardinality of each categorical variable]
+    """[Small helper function just to find the cardinality
+    of each categorical variable]
 
     Args:
         train_data_obj (RossmanDataset): [training data object]
@@ -290,8 +291,10 @@ if __name__ == "__main__":
     # get the cardinality of each categorical variable.
     embedding_sizes = get_embedding_sizes(train_data_obj)
 
+    hyper_parameters = {}  # TODO
+
     # set batch size
-    batch_size = 50000
+    batch_size = 500000
 
     # create data loaders from datasets
     # TODO: test if ASYNC loading is quicker
