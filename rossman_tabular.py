@@ -104,6 +104,8 @@ class learner:
         self,
         train_data: torch.utils.data.DataLoader,
         valid_data: torch.utils.data.DataLoader,
+        cosine_annealing_period: int,
+        lr: float,
     ):
         """[sets up logging, torch device, optimizer and scheduler.]
 
@@ -112,7 +114,7 @@ class learner:
             valid_data (torch.utils.data.DataLoader): [validation data]
 
         Returns:
-            [type]: [description]
+            [learner]: [learner object]
         """
         self.writer = SummaryWriter("runs/{}".format(random.randint(0, 1e9)))
 
@@ -124,11 +126,20 @@ class learner:
         self.model = tabular_rossman_model(
             embedding_sizes, len(rossman.cont_vars)
         )
+
+        self.best_validation_error = None
+
+        # optimizer
+        self.cosine_annealing_period = cosine_annealing_period
+        self.lr = lr
         self.initialize_optimizer()
-        self.schedule = torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.optim, T_max=10
-        )
-        self.loss = torch.nn.MSELoss()
+
+        self.hyperparameters = {}
+        self.hyperparameters[
+            "cosine_annealing_period"
+        ] = self.cosine_annealing_period
+        self.hyperparameters["lr"] = self.lr
+        self.hyperparameters["hparam/current_epoch"] = 0
 
         # transfer everything to the device
         self.device = torch.device(
@@ -141,9 +152,9 @@ class learner:
         """[creates a clean optimizer and scheduler.
         Can by improved by providing resetting functionality, works for now]
         """
-        self.optim = torch.optim.Adam(self.model.parameters(), lr=0.005)
+        self.optim = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         self.schedule = torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.optim, T_max=10
+            self.optim, T_max=self.cosine_annealing_period
         )
 
     def exp_rmspe(
@@ -232,6 +243,15 @@ class learner:
             self.validation_set(current_epoch)
             if self.schedule._step_count % 10 == 0:
                 self.initialize_optimizer()
+
+        self.hyperparameters["hparam/current_epoch"] = current_epoch
+        self.hyperparameters["hparam/best_epoch"] = self.best_epoch
+        self.writer.add_hparams(
+            hparam_dict=self.hyperparameters,
+            metric_dict={
+                "hparam/validation_error": self.best_validation_error
+            },
+        )
         return None
 
     def validation_set(self, current_epoch: int):
@@ -244,6 +264,7 @@ class learner:
             [None]: [None]
         """
         losses = []
+        self.model.eval()
         for batch in self.valid_data:
             predictions = self.model.forward(
                 batch[0].to(self.device), batch[1].to(self.device)
@@ -252,10 +273,19 @@ class learner:
                 predictions[:, 0], batch[2][:, 0].to(self.device), log=True
             )
             losses.append(batch_loss)
+        current_validation_error = torch.stack(losses).mean()
+
+        if (
+            not self.best_validation_error
+            or self.best_validation_error > current_validation_error
+        ):
+            self.best_validation_error = current_validation_error
+            self.best_epoch = current_epoch
 
         self.writer.add_scalar(
             "Validation_Loss", torch.stack(losses).mean(), current_epoch
         )
+        self.model.train()
         return None
 
 
@@ -291,8 +321,6 @@ if __name__ == "__main__":
     # get the cardinality of each categorical variable.
     embedding_sizes = get_embedding_sizes(train_data_obj)
 
-    hyper_parameters = {}  # TODO
-
     # set batch size
     batch_size = 500000
 
@@ -306,5 +334,8 @@ if __name__ == "__main__":
     )
 
     # build and train model
-    rossman_learner = learner(train_data_loader, valid_data_loader)
-    rossman_learner.training_loop(30000)
+    rossman_learner = learner(train_data_loader, valid_data_loader, 3, 0.001)
+    rossman_learner.training_loop(30)
+
+    rossman_learner = learner(train_data_loader, valid_data_loader, 4, 0.005)
+    rossman_learner.training_loop(30)
