@@ -6,6 +6,7 @@ from torch.utils.tensorboard import SummaryWriter
 import random
 import coloredlogs
 import logging
+import numpy as np
 
 
 class tabular_rossman_model(torch.nn.Module):
@@ -15,24 +16,30 @@ class tabular_rossman_model(torch.nn.Module):
         torch ([torch.nn.Module]): [inheritance]
     """
 
-    def __init__(self, embedding_sizes: List[int], cont_vars_sizes: int):
+    def __init__(
+        self,
+        embedding_sizes: List[int],
+        embedding_depths: List[int],
+        layer_sizes: List[int],
+    ):
         """[Sets up the network. Has Categorical embeddings for
         categorical input and simple input for linear layers]
 
         Args:
             embedding_sizes (List[int]):
             [list of the cardinalities of the categorical variables]
+            embeddings_depths (List[int]):
+            [the dimension of each dimension]
             cont_vars_sizes (int): [length of the continuous variables.]
+            layer_sizes (List[int]):
+            [sizes of the linear layers i.e. [5,5,2,1] -> a linear layer with 5,5 -> 5,2 -> 2,1]
         """
         super(tabular_rossman_model, self).__init__()
 
         # build embeddings for categories
         self.CategoricalEmbeddings = []
-        self.embedding_depth = 6  # hard coded for now.
-        for i in embedding_sizes:
-            self.CategoricalEmbeddings.append(
-                torch.nn.Embedding(i, self.embedding_depth)
-            )
+        for depth, i in zip(embedding_depths, embedding_sizes):
+            self.CategoricalEmbeddings.append(torch.nn.Embedding(i, depth))
 
         # convert the list of embeddings to a ModuleList so that PyTorch finds
         # it as a paramater for backpropagation...
@@ -40,25 +47,21 @@ class tabular_rossman_model(torch.nn.Module):
             self.CategoricalEmbeddings
         )
         self.EmbeddingDropout = torch.nn.Dropout()
-
+        self.linear_layers = []
+        # cont_vars_sizes + len(embedding_sizes) * self.embedding_depth,
         # build linear layers for continuous variables and cat embeddings
-        self.linear_input_layer = torch.nn.Linear(
-            cont_vars_sizes + len(embedding_sizes) * self.embedding_depth,
-            cont_vars_sizes,
+        for in_size, out_size in zip(layer_sizes[:-2], (layer_sizes[1:-1])):
+            self.linear_layers.append(torch.nn.Linear(in_size, out_size))
+            self.linear_layers.append(torch.nn.ReLU())
+            self.linear_layers.append(torch.nn.BatchNorm1d(out_size))
+            self.linear_layers.append(torch.nn.Dropout())
+
+        # output layer
+        self.linear_layers.append(
+            torch.nn.Linear(layer_sizes[-2], layer_sizes[-1])
         )
-
-        self.Dropout1 = torch.nn.Dropout()
-        self.Batch1 = torch.nn.BatchNorm1d(cont_vars_sizes)
-        self.ReLU1 = torch.nn.ReLU()
-
-        self.linear_layer2 = torch.nn.Linear(cont_vars_sizes, 5)
-        self.Dropout2 = torch.nn.Dropout()
-        self.Batch2 = torch.nn.BatchNorm1d(5)
-        self.ReLU2 = torch.nn.ReLU()
-
-        self.linear_layer3 = torch.nn.Linear(5, 2)
-        self.Dropout1 = torch.nn.Dropout()
-        self.squash = torch.nn.Sigmoid()
+        self.linear_layers = torch.nn.ModuleList(self.linear_layers)
+        # internal counter
         self.batch = 0
 
     def forward(
@@ -83,17 +86,11 @@ class tabular_rossman_model(torch.nn.Module):
         ]
         cat_outputs = self.EmbeddingDropout(torch.cat(cat_outputs, 1))
 
-        l1 = self.Dropout1(
-            self.ReLU1(
-                self.linear_input_layer(
-                    torch.cat([cat_outputs, self.Batch1(cont_data)], 1)
-                )
-            )
-        )
-        l2 = self.Dropout2(self.ReLU2(self.linear_layer2(self.ReLU1(l1))))
-        l2 = self.Batch2(l2)
-        l3 = self.linear_layer3(self.ReLU2(l2))
-        return self.squash(l3)  # notice no rescaling
+        # inp ->   Dropout(BatchNorm1(ReLU(linear(inp))))
+        x = torch.cat([cat_outputs, cont_data], 1)
+        for layer in self.linear_layers:
+            x = layer(x)
+        return x
 
 
 class learner:
@@ -102,29 +99,42 @@ class learner:
 
     def __init__(
         self,
-        train_data: torch.utils.data.DataLoader,
-        valid_data: torch.utils.data.DataLoader,
+        train_data_obj: RossmanDataset,
+        valid_data_obj: RossmanDataset,
         cosine_annealing_period: int,
         lr: float,
+        batch_size: int,
+        layer_sizes: List[int],
     ):
         """[sets up logging, torch device, optimizer and scheduler.]
 
         Args:
             train_data (torch.utils.data.DataLoader): [training data]
             valid_data (torch.utils.data.DataLoader): [validation data]
-
+            layer_sizes (List[int]): [sizes of the hidden layers]
         Returns:
             [learner]: [learner object]
         """
         self.writer = SummaryWriter("runs/{}".format(random.randint(0, 1e9)))
 
         # data loaders
-        self.train_data = train_data
-        self.valid_data = valid_data
+        # Don't do like this with a large dataset if you are going
+        # to do hyperparameter search
+        self.train_data_obj = train_data_obj
+        self.valid_data_obj = valid_data_obj
+        self.batch_size = batch_size
+        self.load_data(train_data_obj, valid_data_obj, self.batch_size)
+
+        # Create the embedding depths based on a simple rule
+        embedding_depths = [int(np.log(x + 3)) for x in embedding_sizes]
+
+        # add the non-hidden layer sizes
+        layer_sizes.insert(0, len(rossman.cont_vars) + sum(embedding_depths))
+        layer_sizes.append(2)
 
         # create model skeleton
         self.model = tabular_rossman_model(
-            embedding_sizes, len(rossman.cont_vars)
+            embedding_sizes, embedding_depths, layer_sizes,
         )
 
         self.best_validation_error = None
@@ -134,19 +144,30 @@ class learner:
         self.lr = lr
         self.initialize_optimizer()
 
+        # hyperparameter logging.
         self.hyperparameters = {}
         self.hyperparameters[
             "cosine_annealing_period"
         ] = self.cosine_annealing_period
         self.hyperparameters["lr"] = self.lr
         self.hyperparameters["hparam/current_epoch"] = 0
-
+        # self.hyperparameters["embedding_sizes"] = embedding_sizes
         # transfer everything to the device
         self.device = torch.device(
             "cuda:0" if torch.cuda.is_available() else "cpu"
         )
         self.model.to(self.device)
         return None
+
+    def load_data(self, train_data_obj, valid_data_obj, batch_size):
+        # create data loaders from datasets
+        # TODO: test if ASYNC loading is quicker
+        self.train_data = torch.utils.data.DataLoader(
+            train_data_obj, batch_size=batch_size, pin_memory=True
+        )
+        self.valid_data = torch.utils.data.DataLoader(
+            valid_data_obj, batch_size=batch_size, pin_memory=True
+        )
 
     def initialize_optimizer(self):
         """[creates a clean optimizer and scheduler.
@@ -241,11 +262,16 @@ class learner:
                 current_epoch,
             )
             self.validation_set(current_epoch)
-            if self.schedule._step_count % 10 == 0:
+            if self.schedule._step_count % self.cosine_annealing_period == 0:
                 self.initialize_optimizer()
+        # do logging of results.
+        self.dump_hyperparameters_to_log(current_epoch)
+        return None
 
+    def dump_hyperparameters_to_log(self, current_epoch):
         self.hyperparameters["hparam/current_epoch"] = current_epoch
         self.hyperparameters["hparam/best_epoch"] = self.best_epoch
+        self.hyperparameters["hparam/batch_size"] = self.batch_size
         self.writer.add_hparams(
             hparam_dict=self.hyperparameters,
             metric_dict={
@@ -324,18 +350,13 @@ if __name__ == "__main__":
     # set batch size
     batch_size = 500000
 
-    # create data loaders from datasets
-    # TODO: test if ASYNC loading is quicker
-    train_data_loader = torch.utils.data.DataLoader(
-        train_data_obj, batch_size=batch_size, pin_memory=True
-    )
-    valid_data_loader = torch.utils.data.DataLoader(
-        valid_data_obj, batch_size=batch_size, pin_memory=True
-    )
-
     # build and train model
-    rossman_learner = learner(train_data_loader, valid_data_loader, 3, 0.001)
-    rossman_learner.training_loop(30)
+    rossman_learner = learner(
+        train_data_obj, valid_data_obj, 3, 0.001, batch_size, [60, 30, 5]
+    )
+    rossman_learner.training_loop(200)
 
-    rossman_learner = learner(train_data_loader, valid_data_loader, 4, 0.005)
-    rossman_learner.training_loop(30)
+    # rossman_learner = learner(
+    #     train_data_obj, valid_data_obj, 3, 0.001, batch_size
+    # )
+    # rossman_learner.training_loop(2)

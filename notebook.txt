@@ -1,14 +1,16 @@
 look at GPU usage ->   watch -d -n 0.5 nvidia-smi 
 Things to check 
+-Hyperparameters to include 
+    - Batch size - done
+    - Embedding sizes - done
+    - depth 
+    - layer sizes
+    - Momentum
+    - Dropout
+- turn EXP_rsme into METRIC NOT loss
 - how does fastAI do the embedding layers. 
 - LR Finder
 - Is batch norm implemented as it is intended to be 
 - validation set in eval mode to avoid drop out. 
 - is faster with memory async
-
-Hyperparameters to include 
-- Batch size
-- Embedding sizes 
-- depth
-- layer sizes
-- Momentum
+- renormalization
