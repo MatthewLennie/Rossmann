@@ -3,10 +3,10 @@ Things to check
 -Hyperparameters to include 
     - Batch size - done
     - Embedding sizes - done
-    - depth 
-    - layer sizes
-    - Momentum
-    - Dropout
+    - depth - done
+    - layer sizes - done
+    - Momentum - 
+    - Dropout - Done
 - turn EXP_rsme into METRIC NOT loss
 - how does fastAI do the embedding layers. 
 - LR Finder

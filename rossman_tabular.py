@@ -21,6 +21,7 @@ class tabular_rossman_model(torch.nn.Module):
         embedding_sizes: List[int],
         embedding_depths: List[int],
         layer_sizes: List[int],
+        dropout: float,
     ):
         """[Sets up the network. Has Categorical embeddings for
         categorical input and simple input for linear layers]
@@ -46,7 +47,7 @@ class tabular_rossman_model(torch.nn.Module):
         self.CategoricalEmbeddings = torch.nn.ModuleList(
             self.CategoricalEmbeddings
         )
-        self.EmbeddingDropout = torch.nn.Dropout()
+        self.EmbeddingDropout = torch.nn.Dropout(dropout)
         self.linear_layers = []
         # cont_vars_sizes + len(embedding_sizes) * self.embedding_depth,
         # build linear layers for continuous variables and cat embeddings
@@ -54,7 +55,7 @@ class tabular_rossman_model(torch.nn.Module):
             self.linear_layers.append(torch.nn.Linear(in_size, out_size))
             self.linear_layers.append(torch.nn.ReLU())
             self.linear_layers.append(torch.nn.BatchNorm1d(out_size))
-            self.linear_layers.append(torch.nn.Dropout())
+            self.linear_layers.append(torch.nn.Dropout(p=dropout))
 
         # output layer
         self.linear_layers.append(
@@ -105,6 +106,7 @@ class learner:
         lr: float,
         batch_size: int,
         layer_sizes: List[int],
+        dropout: float,
     ):
         """[sets up logging, torch device, optimizer and scheduler.]
 
@@ -125,8 +127,11 @@ class learner:
         self.batch_size = batch_size
         self.load_data(train_data_obj, valid_data_obj, self.batch_size)
 
-        # Create the embedding depths based on a simple rule
-        embedding_depths = [int(np.log(x + 3)) for x in embedding_sizes]
+        # Create the embedding depths based on a simple rule from jeremey
+
+        embedding_depths = [
+            min(600, round(1.6 * x ** 0.56)) for x in embedding_sizes
+        ]
 
         # add the non-hidden layer sizes
         layer_sizes.insert(0, len(rossman.cont_vars) + sum(embedding_depths))
@@ -134,7 +139,7 @@ class learner:
 
         # create model skeleton
         self.model = tabular_rossman_model(
-            embedding_sizes, embedding_depths, layer_sizes,
+            embedding_sizes, embedding_depths, layer_sizes, dropout
         )
 
         self.best_validation_error = None
@@ -151,8 +156,10 @@ class learner:
         ] = self.cosine_annealing_period
         self.hyperparameters["lr"] = self.lr
         self.hyperparameters["hparam/current_epoch"] = 0
+        self.hyperparameters["dropout"] = dropout
         # self.hyperparameters["embedding_sizes"] = embedding_sizes
         # transfer everything to the device
+
         self.device = torch.device(
             "cuda:0" if torch.cuda.is_available() else "cpu"
         )
@@ -192,8 +199,10 @@ class learner:
         Returns:
             torch.tensor: [description]
         """
+
         pred, targ = torch.exp(pred), torch.exp(targ)
         pct_var = (targ - pred) / targ
+        assert torch.isnan(pct_var).sum() == 0
         if log:
             self.writer.add_histogram("Losses_percentages", pct_var)
         return torch.sqrt((pct_var ** 2).mean())
@@ -295,6 +304,7 @@ class learner:
             predictions = self.model.forward(
                 batch[0].to(self.device), batch[1].to(self.device)
             )
+
             batch_loss = self.exp_rmspe(
                 predictions[:, 0], batch[2][:, 0].to(self.device), log=True
             )
@@ -348,14 +358,44 @@ if __name__ == "__main__":
     embedding_sizes = get_embedding_sizes(train_data_obj)
 
     # set batch size
-    batch_size = 500000
-
+    batch_size = [100000, 500000, 10000]
+    cosine_annealing_period = [3, 10, 30, 2]
+    layer_sizes = [
+        [60, 30, 5],
+        [60, 40, 30, 4],
+        [40, 10],
+        [30],
+        [60, 60, 40, 30, 20, 10],
+        [60, 60, 60, 40, 30, 20, 10],
+    ]
+    lr = [0.001, 0.01, 0.05, 0.001]
+    dropout = [0.1, 0.5, 0.8]
     # build and train model
-    rossman_learner = learner(
-        train_data_obj, valid_data_obj, 3, 0.001, batch_size, [60, 30, 5]
-    )
-    rossman_learner.training_loop(200)
+    for trial in range(30):
+        c1 = int(np.random.choice(cosine_annealing_period))
+        c2 = np.random.choice(lr)
+        c3 = int(np.random.choice(batch_size))
+        c4 = np.random.choice(layer_sizes).copy()
+        c5 = np.random.choice(dropout)
+        rossman_learner = learner(
+            train_data_obj, valid_data_obj, c1, c2, c3, c4, c5,
+        )
+        rossman_learner.writer.add_text(
+            "config".format(trial),
+            "Cosine:{}, lr: {}, batchsize: {}, layers:{}, dropout:{}".format(
+                c1, c2, c3, c4, c5
+            ),
+        )
 
+        print(
+            "Cosine:{}, lr: {}, batchsize: {}, layers:{}, dropout:{}".format(
+                c1, c2, c3, c4, c5
+            )
+        )
+        rossman_learner.training_loop(400)
+
+        # delete the model once done with it or watch the GPU ram disappear.
+        del rossman_learner
     # rossman_learner = learner(
     #     train_data_obj, valid_data_obj, 3, 0.001, batch_size
     # )
