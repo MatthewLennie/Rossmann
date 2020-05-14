@@ -1,3 +1,7 @@
+"""
+This file contains the main implementation for the Rossman Kaggle Challenge.
+Running as a script runs a random hyperparameter search
+"""
 import torch
 import import_rossman_data as rossman
 from import_rossman_data import RossmanDataset
@@ -22,6 +26,7 @@ class tabular_rossman_model(torch.nn.Module):
         embedding_depths: List[int],
         layer_sizes: List[int],
         dropout: float,
+        writer: torch.utils.tensorboard.writer,
     ):
         """[Sets up the network. Has Categorical embeddings for
         categorical input and simple input for linear layers]
@@ -34,8 +39,12 @@ class tabular_rossman_model(torch.nn.Module):
             cont_vars_sizes (int): [length of the continuous variables.]
             layer_sizes (List[int]):
             [sizes of the linear layers i.e. [5,5,2,1] -> a linear layer with 5,5 -> 5,2 -> 2,1]
+            dropout (float): percentage dropout
+            writer (torch.utils.tensorboard.writer): the writer object to create the tensorboard dashboard
         """
         super(tabular_rossman_model, self).__init__()
+
+        self.writer = writer
 
         # build embeddings for categories
         self.CategoricalEmbeddings = []
@@ -64,6 +73,7 @@ class tabular_rossman_model(torch.nn.Module):
         self.linear_layers = torch.nn.ModuleList(self.linear_layers)
         # internal counter
         self.batch = 0
+        self.put_activations_into_tensorboard = False
 
     def forward(
         self, cat_data: torch.tensor, cont_data: torch.tensor
@@ -86,11 +96,19 @@ class tabular_rossman_model(torch.nn.Module):
             for idx, emb in enumerate(self.CategoricalEmbeddings)
         ]
         cat_outputs = self.EmbeddingDropout(torch.cat(cat_outputs, 1))
-
         # inp ->   Dropout(BatchNorm1(ReLU(linear(inp))))
         x = torch.cat([cat_outputs, cont_data], 1)
-        for layer in self.linear_layers:
+        for layer_num, layer in enumerate(self.linear_layers):
+            if self.put_activations_into_tensorboard:
+                self.writer.add_histogram(
+                    "activations/Layer_{}".format(layer_num), x
+                )
             x = layer(x)
+
+            # check for nans. Done this way to prevent mem leak
+            check = torch.isnan(x).sum() == 0
+            assert check
+            del check
         return x
 
 
@@ -107,6 +125,7 @@ class learner:
         batch_size: int,
         layer_sizes: List[int],
         dropout: float,
+        betas: tuple,
     ):
         """[sets up logging, torch device, optimizer and scheduler.]
 
@@ -128,25 +147,31 @@ class learner:
         self.load_data(train_data_obj, valid_data_obj, self.batch_size)
 
         # Create the embedding depths based on a simple rule from jeremey
-
         embedding_depths = [
             min(600, round(1.6 * x ** 0.56)) for x in embedding_sizes
         ]
 
-        # add the non-hidden layer sizes
+        # add the non-hidden layer sizes to the array containing the layer sizes
         layer_sizes.insert(0, len(rossman.cont_vars) + sum(embedding_depths))
         layer_sizes.append(2)
 
         # create model skeleton
         self.model = tabular_rossman_model(
-            embedding_sizes, embedding_depths, layer_sizes, dropout
+            embedding_sizes,
+            embedding_depths,
+            layer_sizes,
+            dropout,
+            self.writer,
         )
 
+        # For recording best validation error in tensorboard
         self.best_validation_error = None
 
         # optimizer
+        self.loss = torch.nn.MSELoss()
         self.cosine_annealing_period = cosine_annealing_period
         self.lr = lr
+        self.betas = tuple(betas)  # for adam.
         self.initialize_optimizer()
 
         # hyperparameter logging.
@@ -157,9 +182,8 @@ class learner:
         self.hyperparameters["lr"] = self.lr
         self.hyperparameters["hparam/current_epoch"] = 0
         self.hyperparameters["dropout"] = dropout
-        # self.hyperparameters["embedding_sizes"] = embedding_sizes
-        # transfer everything to the device
 
+        # transfer everything to the device
         self.device = torch.device(
             "cuda:0" if torch.cuda.is_available() else "cpu"
         )
@@ -180,7 +204,9 @@ class learner:
         """[creates a clean optimizer and scheduler.
         Can by improved by providing resetting functionality, works for now]
         """
-        self.optim = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        self.optim = torch.optim.Adam(
+            self.model.parameters(), lr=self.lr, betas=self.betas
+        )
         self.schedule = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optim, T_max=self.cosine_annealing_period
         )
@@ -213,19 +239,20 @@ class learner:
         """[summary]
 
         Args:
-            input_data (List[torch.tensor]): [description]
-            log_grads (bool, optional): [description]. Defaults to False.
+            input_data (List[torch.tensor]): [List containning the categorical
+            and continuous variables]
+            log_grads (bool, optional): [whether to log the weights]. Defaults to False.
 
         Returns:
-            torch.tensor: [description]
+            torch.tensor: [returns loss from the batch]
         """
         cat = input_data[0].to(self.device)
         cont = input_data[1].to(self.device)
         predictions = self.model.forward(cat, cont)
+        targ = input_data[2][:, 0].to(self.device)
         # TODO include both terms in loss
-        batch_loss = self.exp_rmspe(
-            predictions[:, 0], input_data[2][:, 0].to(self.device)
-        )
+        # batch_loss = self.exp_rmspe(predictions[:, 0], targ)
+        batch_loss = self.loss(predictions[:, 0], targ)
         batch_loss.backward()
         if log_grads:
             self.dump_model_parameters_to_log()
@@ -261,6 +288,7 @@ class learner:
             for batch in self.train_data:
                 training_batch_loss = self.training_step(batch, log_grads)
                 log_grads = False
+
             # perform tensorboard logging.
             self.writer.add_scalar(
                 "Training_Loss", training_batch_loss, current_epoch
@@ -271,7 +299,10 @@ class learner:
                 current_epoch,
             )
             self.validation_set(current_epoch)
-            if self.schedule._step_count % self.cosine_annealing_period == 0:
+            if (
+                self.schedule._step_count * 2 % self.cosine_annealing_period
+                == 0
+            ):
                 self.initialize_optimizer()
         # do logging of results.
         self.dump_hyperparameters_to_log(current_epoch)
@@ -305,8 +336,12 @@ class learner:
                 batch[0].to(self.device), batch[1].to(self.device)
             )
 
-            batch_loss = self.exp_rmspe(
-                predictions[:, 0], batch[2][:, 0].to(self.device), log=True
+            # batch_loss = self.exp_rmspe(
+            #     predictions[:, 0], batch[2][:, 0].to(self.device), log=True
+            # )
+
+            batch_loss = self.loss(
+                predictions[:, 0], batch[2][:, 0].to(self.device)
             )
             losses.append(batch_loss)
         current_validation_error = torch.stack(losses).mean()
@@ -347,6 +382,9 @@ def get_embedding_sizes(train_data_obj: RossmanDataset) -> List[int]:
 
 
 if __name__ == "__main__":
+    # sets up a hyperparameter search of the model
+
+    # Logging settings
     coloredlogs.install(level="DEBUG")
     logger = logging.getLogger(__name__)
 
@@ -357,46 +395,51 @@ if __name__ == "__main__":
     # get the cardinality of each categorical variable.
     embedding_sizes = get_embedding_sizes(train_data_obj)
 
-    # set batch size
-    batch_size = [100000, 500000, 10000]
-    cosine_annealing_period = [3, 10, 30, 2]
+    # Hyperparameter Search Range
+    batch_size = [200000]  # , 500000]
+    cosine_annealing_period = [10, 2]
     layer_sizes = [
-        [60, 30, 5],
-        [60, 40, 30, 4],
-        [40, 10],
-        [30],
+        [240, 1000, 50],  # <- Jeremy used this one in the course. ``
+        [240, 1000, 250, 50],
+        [240, 150, 80, 40, 10],
         [60, 60, 40, 30, 20, 10],
-        [60, 60, 60, 40, 30, 20, 10],
     ]
-    lr = [0.001, 0.01, 0.05, 0.001]
-    dropout = [0.1, 0.5, 0.8]
+    lr = [0.001, 0.0005]
+    dropout = [0.1, 0.3, 0.4]
+    betas = [
+        [0.9, 0.999],  # The normal default
+        [0.99, 0.9999],
+        [0.999, 0.99999],
+        [0.8, 0.99],
+    ]
+
     # build and train model
-    for trial in range(30):
+    for trial in range(60):
+
+        # Randomly choose a set of hyperparameters
         c1 = int(np.random.choice(cosine_annealing_period))
         c2 = np.random.choice(lr)
         c3 = int(np.random.choice(batch_size))
         c4 = np.random.choice(layer_sizes).copy()
         c5 = np.random.choice(dropout)
+        c6 = betas[np.random.randint(0, len(betas))]
         rossman_learner = learner(
-            train_data_obj, valid_data_obj, c1, c2, c3, c4, c5,
+            train_data_obj, valid_data_obj, c1, c2, c3, c4, c5, c6
         )
-        rossman_learner.writer.add_text(
-            "config".format(trial),
-            "Cosine:{}, lr: {}, batchsize: {}, layers:{}, dropout:{}".format(
-                c1, c2, c3, c4, c5
-            ),
+        Hparam_string = "Cosine:{}, lr: {}, batchsize: {}, layers:{}, dropout:{}, momentum: {}".format(
+            c1, c2, c3, c4, c5, c6
         )
 
-        print(
-            "Cosine:{}, lr: {}, batchsize: {}, layers:{}, dropout:{}".format(
-                c1, c2, c3, c4, c5
-            )
-        )
-        rossman_learner.training_loop(400)
+        # print out the Hyperparameters for logging purposes.
+        rossman_learner.writer.add_text("config".format(trial), Hparam_string)
+        print(Hparam_string)
+        rossman_learner.model.put_activations_into_tensorboard = True
+        # rossman_learner.training_loop(450)
+        try:
+            rossman_learner.training_loop(450)
+        except AssertionError as e:
+            print("got NAN activations")
+            rossman_learner.writer.add_text("failure message", Hparam_string)
 
         # delete the model once done with it or watch the GPU ram disappear.
         del rossman_learner
-    # rossman_learner = learner(
-    #     train_data_obj, valid_data_obj, 3, 0.001, batch_size
-    # )
-    # rossman_learner.training_loop(2)
