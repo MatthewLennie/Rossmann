@@ -11,7 +11,7 @@ Visualisation is provided through tensorboard, this can be launched with: tensor
 activations can added to the tensorboard with learner.model.put_activations_into_tensorboard=True
 
 Things learnt on this project:
-- Default momentum was pretty good
+- Default momentum was pretty good, But did manage a better result with lower momentum
 - Go easy on the dropout. I tried 0.8 just out of curiosity, destabilzes the training pretty severely.
 - Make sure you delete old models to ensure that the GPU does garbage collection. 
 - watch gpu resources with: watch -d -n 0.5 nvidia-smi 
@@ -28,3 +28,7 @@ Things to improve in next project:
 - saving and recovery of models. 
 - Better experimental logging. System here wasn't really satisfying. 
 - Better initialization, the current automatic intitialization seems to work well enough but could be better
+
+Validation 0.000094297 MSE 
+Cosine:2, lr: 0.001, batchsize: 200000, layers:[248, 60, 60, 40, 30, 20, 10, 2], dropout:0.4, momentum: [0.8, 0.99]
+

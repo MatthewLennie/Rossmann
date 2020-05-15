@@ -5,6 +5,7 @@ from sklearn.preprocessing import MinMaxScaler
 import pickle
 from typing import List
 
+# Keys of the different types of variables.
 cat_vars = [
     "Store",
     "DayOfWeek",
@@ -113,6 +114,7 @@ def data_clean(joined: pd.DataFrame) -> pd.DataFrame:
     )
 
     weather_vars.append("Events")
+
     # some of the initial Max_Gust_Speed Data was missing
     # so I filled with the Max_wind Speed.
     joined.loc[
@@ -130,6 +132,8 @@ def data_clean(joined: pd.DataFrame) -> pd.DataFrame:
         joined["WindDirDegrees"].astype("category").cat.codes
     )
     joined["StoreType"] = joined["StoreType"].astype("category").cat.codes
+
+    # Drop variables that didn't look useful.
     joined.drop(
         [
             "Promo2Since",
@@ -184,9 +188,6 @@ def data_clean(joined: pd.DataFrame) -> pd.DataFrame:
 
 class RossmanDataset(Dataset):
     """[puts data into a useful format to be used by the dataloader]
-
-    Arguments:
-        Dataset {[]} -- [description]
     """
 
     @classmethod
@@ -250,6 +251,8 @@ class RossmanDataset(Dataset):
 
         self.data.reset_index(inplace=True)
         self.data.drop(["index"], inplace=True, axis=1)
+
+        # Make sure that the columsn have correct types
         self.x_data_cat = torch.tensor(
             self.data[cat_vars].values, dtype=torch.int
         )
@@ -287,7 +290,6 @@ if __name__ == "__main__":
     # i.e. drop nonesense columns and fill nans
     joined = data_clean(joined)
 
-    # joined.to_pickle(output_file_name)
     # train valid splitting
     split_train = int(joined.shape[0] * 0.8)
     split_valid = joined.shape[0] - split_train

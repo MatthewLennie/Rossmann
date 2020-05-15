@@ -13,7 +13,7 @@ import logging
 import numpy as np
 
 
-class tabular_rossman_model(torch.nn.Module):
+class TabularRossmanModel(torch.nn.Module):
     """[model class for rossman model, tabular style nn]
 
     Args:
@@ -38,11 +38,13 @@ class tabular_rossman_model(torch.nn.Module):
             [the dimension of each dimension]
             cont_vars_sizes (int): [length of the continuous variables.]
             layer_sizes (List[int]):
-            [sizes of the linear layers i.e. [5,5,2,1] -> a linear layer with 5,5 -> 5,2 -> 2,1]
+            [sizes of the linear layers i.e. [5,5,2,1] ->
+            a linear layer with 5,5 -> 5,2 -> 2,1]
             dropout (float): percentage dropout
-            writer (torch.utils.tensorboard.writer): the writer object to create the tensorboard dashboard
+            writer (torch.utils.tensorboard.writer):
+            the writer object to create the tensorboard dashboard
         """
-        super(tabular_rossman_model, self).__init__()
+        super(TabularRossmanModel, self).__init__()
 
         self.writer = writer
 
@@ -88,7 +90,6 @@ class tabular_rossman_model(torch.nn.Module):
             torch.tensor: [predictions in normalized form]
         """
         self.batch += 1
-        logger.debug("count: {}".format(self.batch))
 
         # Get embedding for each Categorical variable.
         cat_outputs = [
@@ -112,7 +113,7 @@ class tabular_rossman_model(torch.nn.Module):
         return x
 
 
-class learner:
+class Learner:
     """[Learner class for the Rossmann tabular model]
     """
 
@@ -156,7 +157,7 @@ class learner:
         layer_sizes.append(2)
 
         # create model skeleton
-        self.model = tabular_rossman_model(
+        self.model = TabularRossmanModel(
             embedding_sizes,
             embedding_depths,
             layer_sizes,
@@ -304,6 +305,8 @@ class learner:
                 == 0
             ):
                 self.initialize_optimizer()
+
+            logger.debug("epoch: {}".format(current_epoch))
         # do logging of results.
         self.dump_hyperparameters_to_log(current_epoch)
         return None
@@ -396,13 +399,13 @@ if __name__ == "__main__":
     embedding_sizes = get_embedding_sizes(train_data_obj)
 
     # Hyperparameter Search Range
-    batch_size = [200000]  # , 500000]
+    batch_size = [150000]  # Maxes out the ram
     cosine_annealing_period = [10, 2]
     layer_sizes = [
-        [240, 1000, 50],  # <- Jeremy used this one in the course. ``
+        [240, 1000, 50],  # <- Jeremy used this one in the course.
         [240, 1000, 250, 50],
         [240, 150, 80, 40, 10],
-        [60, 60, 40, 30, 20, 10],
+        [60, 60, 40, 30, 20, 10],  # <-This one ended up worked well
     ]
     lr = [0.001, 0.0005]
     dropout = [0.1, 0.3, 0.4]
@@ -423,7 +426,7 @@ if __name__ == "__main__":
         c4 = np.random.choice(layer_sizes).copy()
         c5 = np.random.choice(dropout)
         c6 = betas[np.random.randint(0, len(betas))]
-        rossman_learner = learner(
+        rossman_learner = Learner(
             train_data_obj, valid_data_obj, c1, c2, c3, c4, c5, c6
         )
         Hparam_string = "Cosine:{}, lr: {}, batchsize: {}, layers:{}, dropout:{}, momentum: {}".format(
@@ -433,11 +436,12 @@ if __name__ == "__main__":
         # print out the Hyperparameters for logging purposes.
         rossman_learner.writer.add_text("config".format(trial), Hparam_string)
         print(Hparam_string)
-        rossman_learner.model.put_activations_into_tensorboard = True
+        rossman_learner.model.put_activations_into_tensorboard = False
+
         # rossman_learner.training_loop(450)
         try:
-            rossman_learner.training_loop(450)
-        except AssertionError as e:
+            rossman_learner.training_loop(600)
+        except AssertionError:
             print("got NAN activations")
             rossman_learner.writer.add_text("failure message", Hparam_string)
 
