@@ -33,11 +33,11 @@ activations can added to the tensorboard with learner.model.put_activations_into
 - Doing checks on tensors during training is inefficient and can create copies of tensors. 
 
 ## Best Result and Hyperparameters
-Validation Error: 0.000094297 MSE (note I am not comparing to the Percentage MSE)
-- Cosine:2, 
-- lr: 0.001, 
-- batchsize: 200000, 
-- layers:[248, 60, 60, 40, 30, 20, 10, 2], 
-- dropout:0.4,
-- momentum: [0.8, 0.99]
+Validation Error: 5e-5 MSE (note I am not comparing to the Percentage MSE)
+- Cosine:10, 
+- lr: 0.0005, 
+- batchsize: 100000, 
+- layers:[248, 240, 150, 80, 40, 10, 2], 
+- dropout:0.3, 
+- momentum: [0.999, 0.99999]
 
