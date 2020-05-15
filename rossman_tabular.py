@@ -107,6 +107,7 @@ class TabularRossmanModel(torch.nn.Module):
             x = layer(x)
 
             # check for nans. Done this way to prevent mem leak
+            # still pretty nasty on memory usage
             check = torch.isnan(x).sum() == 0
             assert check
             del check
@@ -399,7 +400,7 @@ if __name__ == "__main__":
     embedding_sizes = get_embedding_sizes(train_data_obj)
 
     # Hyperparameter Search Range
-    batch_size = [150000]  # Maxes out the ram
+    batch_size = [100000]  # Maxes out the ram
     cosine_annealing_period = [10, 2]
     layer_sizes = [
         [240, 1000, 50],  # <- Jeremy used this one in the course.
