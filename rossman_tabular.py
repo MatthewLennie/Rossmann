@@ -148,6 +148,12 @@ class Learner:
         self.batch_size = batch_size
         self.load_data(train_data_obj, valid_data_obj, self.batch_size)
 
+        self.build_model(layer_sizes, dropout)
+
+    def build_model(self, layer_sizes, dropout):
+
+        # get the cardinality of each categorical variable.
+        embedding_sizes = self.get_embedding_sizes(self.train_data_obj)
         # Create the embedding depths based on a simple rule from jeremey
         embedding_depths = [
             min(600, round(1.6 * x ** 0.56)) for x in embedding_sizes
@@ -166,30 +172,6 @@ class Learner:
             self.writer,
         )
 
-        # For recording best validation error in tensorboard
-        self.best_validation_error = None
-
-        # optimizer
-        self.loss = torch.nn.MSELoss()
-        self.cosine_annealing_period = cosine_annealing_period
-        self.lr = lr
-        self.betas = tuple(betas)  # for adam.
-        self.initialize_optimizer()
-
-        # hyperparameter logging.
-        self.hyperparameters = {}
-        self.hyperparameters[
-            "cosine_annealing_period"
-        ] = self.cosine_annealing_period
-        self.hyperparameters["lr"] = self.lr
-        self.hyperparameters["hparam/current_epoch"] = 0
-        self.hyperparameters["dropout"] = dropout
-
-        # transfer everything to the device
-        self.device = torch.device(
-            "cuda:0" if torch.cuda.is_available() else "cpu"
-        )
-        self.model.to(self.device)
         return None
 
     def load_data(self, train_data_obj, valid_data_obj, batch_size):
@@ -206,183 +188,191 @@ class Learner:
         """[creates a clean optimizer and scheduler.
         Can by improved by providing resetting functionality, works for now]
         """
+        # For recording best validation error in tensorboard
+        self.best_validation_error = None
+
+        # optimizer
+        self.loss = torch.nn.MSELoss()
+        self.cosine_annealing_period = cosine_annealing_period
+        self.lr = lr
+        self.betas = tuple(betas)  # for adam.
+        self.initialize_optimizer()
         self.optim = torch.optim.Adam(
             self.model.parameters(), lr=self.lr, betas=self.betas
         )
-        self.schedule = torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.optim, T_max=self.cosine_annealing_period
-        )
+        # self.schedule = torch.optim.lr_scheduler.CosineAnnealingLR(
+        #     self.optim, T_max=self.cosine_annealing_period
+        # )
 
-    def exp_rmspe(
-        self, pred: torch.tensor, targ: torch.tensor, log: bool = False
-    ) -> torch.tensor:
-        """[exponential root mean squared percentage error taken from FASTAI code]
+    # def exp_rmspe(
+    #     self, pred: torch.tensor, targ: torch.tensor, log: bool = False
+    # ) -> torch.tensor:
+    #     """[exponential root mean squared percentage error taken from FASTAI code]
+
+    #     Args:
+    #         pred (torch.tensor): [predictions]
+    #         targ (torch.tensor): [target values]
+    #         log (bool, optional): [optional logging flag for tensorboard].
+    #          Defaults to False.
+
+    #     Returns:
+    #         torch.tensor: [description]
+    #     """
+
+    #     pred, targ = torch.exp(pred), torch.exp(targ)
+    #     pct_var = (targ - pred) / targ
+    #     assert torch.isnan(pct_var).sum() == 0
+    #     if log:
+    #         self.writer.add_histogram("Losses_percentages", pct_var)
+    #     return torch.sqrt((pct_var ** 2).mean())
+
+    # def training_step(
+    #     self, input_data: List[torch.tensor], log_grads: bool = False
+    # ) -> torch.tensor:
+    #     """[summary]
+
+    #     Args:
+    #         input_data (List[torch.tensor]): [List containning the categorical
+    #         and continuous variables]
+    #         log_grads (bool, optional): [whether to log the weights]. Defaults to False.
+
+    #     Returns:
+    #         torch.tensor: [returns loss from the batch]
+    #     """
+    #     cat = input_data[0].to(self.device)
+    #     cont = input_data[1].to(self.device)
+    #     predictions = self.model.forward(cat, cont)
+    #     targ = input_data[2][:, 0].to(self.device)
+    #     # TODO include both terms in loss
+    #     # batch_loss = self.exp_rmspe(predictions[:, 0], targ)
+    #     batch_loss = self.loss(predictions[:, 0], targ)
+    #     batch_loss.backward()
+    #     if log_grads:
+    #         self.dump_model_parameters_to_log()
+    #     self.optim.step()
+    #     self.schedule.step()
+    #     self.optim.zero_grad()
+    #     return batch_loss
+
+    # def dump_model_parameters_to_log(self):
+    #     """[throws each of the model parameters into the log]
+    #     """
+    #     for param in self.model.named_parameters():
+
+    #         self.writer.add_histogram(param[0], param[1])
+    #         try:
+    #             self.writer.add_histogram(
+    #                 "Gradient_of_{}".format(param[0]), param[1].grad
+    #             )
+    #         except NotImplementedError:
+    #             logger.debug("Missing Gradient for {}".format(param[0]))
+
+    # def training_loop(self, epochs: int):
+    #     """[runs learner over batchs and epochs.]
+
+    #     Args:
+    #         epochs (int): [number of epochs]
+
+    #     Returns:
+    #         [None]: [None]
+    #     """
+    #     for current_epoch in range(epochs):
+    #         log_grads = True
+    #         for batch in self.train_data:
+    #             training_batch_loss = self.training_step(batch, log_grads)
+    #             log_grads = False
+
+    #         # perform tensorboard logging.
+    #         self.writer.add_scalar(
+    #             "Training_Loss", training_batch_loss, current_epoch
+    #         )
+    #         self.writer.add_scalar(
+    #             "learning_rate",
+    #             self.optim.param_groups[0]["lr"],
+    #             current_epoch,
+    #         )
+    #         self.validation_set(current_epoch)
+    #         if (
+    #             self.schedule._step_count * 2 % self.cosine_annealing_period
+    #             == 0
+    #         ):
+    #             self.initialize_optimizer()
+
+    #         logger.debug("epoch: {}".format(current_epoch))
+    #     # do logging of results.
+    #     self.dump_hyperparameters_to_log(current_epoch)
+    #     return None
+
+    # def dump_hyperparameters_to_log(self, current_epoch):
+    #     self.hyperparameters["hparam/current_epoch"] = current_epoch
+    #     self.hyperparameters["hparam/best_epoch"] = self.best_epoch
+    #     self.hyperparameters["hparam/batch_size"] = self.batch_size
+    #     self.writer.add_hparams(
+    #         hparam_dict=self.hyperparameters,
+    #         metric_dict={
+    #             "hparam/validation_error": self.best_validation_error
+    #         },
+    #     )
+    #     return None
+
+    # def validation_set(self, current_epoch: int):
+    #     """[runs forward over validation set with extra logging]
+
+    #     Args:
+    #         current_epoch (int): [current epoch for logging purposes]
+
+    #     Returns:
+    #         [None]: [None]
+    #     """
+    #     losses = []
+    #     self.model.eval()
+    #     for batch in self.valid_data:
+    #         predictions = self.model.forward(
+    #             batch[0].to(self.device), batch[1].to(self.device)
+    #         )
+
+    #         # batch_loss = self.exp_rmspe(
+    #         #     predictions[:, 0], batch[2][:, 0].to(self.device), log=True
+    #         # )
+
+    #         batch_loss = self.loss(
+    #             predictions[:, 0], batch[2][:, 0].to(self.device)
+    #         )
+    #         losses.append(batch_loss)
+    #     current_validation_error = torch.stack(losses).mean()
+
+    #     if (
+    #         not self.best_validation_error
+    #         or self.best_validation_error > current_validation_error
+    #     ):
+    #         self.best_validation_error = current_validation_error
+    #         self.best_epoch = current_epoch
+
+    #     self.writer.add_scalar(
+    #         "Validation_Loss", torch.stack(losses).mean(), current_epoch
+    #     )
+    #     self.model.train()
+    #     return None
+
+    def get_embedding_sizes(self, train_data_obj: RossmanDataset) -> List[int]:
+        """[Small helper function just to find the cardinality
+        of each categorical variable]
 
         Args:
-            pred (torch.tensor): [predictions]
-            targ (torch.tensor): [target values]
-            log (bool, optional): [optional logging flag for tensorboard].
-             Defaults to False.
+            train_data_obj (RossmanDataset): [training data object]
 
         Returns:
-            torch.tensor: [description]
+            List[int]: [results list of cardinalities]
         """
+        embedding_sizes = []
 
-        pred, targ = torch.exp(pred), torch.exp(targ)
-        pct_var = (targ - pred) / targ
-        assert torch.isnan(pct_var).sum() == 0
-        if log:
-            self.writer.add_histogram("Losses_percentages", pct_var)
-        return torch.sqrt((pct_var ** 2).mean())
-
-    def training_step(
-        self, input_data: List[torch.tensor], log_grads: bool = False
-    ) -> torch.tensor:
-        """[summary]
-
-        Args:
-            input_data (List[torch.tensor]): [List containning the categorical
-            and continuous variables]
-            log_grads (bool, optional): [whether to log the weights]. Defaults to False.
-
-        Returns:
-            torch.tensor: [returns loss from the batch]
-        """
-        cat = input_data[0].to(self.device)
-        cont = input_data[1].to(self.device)
-        predictions = self.model.forward(cat, cont)
-        targ = input_data[2][:, 0].to(self.device)
-        # TODO include both terms in loss
-        # batch_loss = self.exp_rmspe(predictions[:, 0], targ)
-        batch_loss = self.loss(predictions[:, 0], targ)
-        batch_loss.backward()
-        if log_grads:
-            self.dump_model_parameters_to_log()
-        self.optim.step()
-        self.schedule.step()
-        self.optim.zero_grad()
-        return batch_loss
-
-    def dump_model_parameters_to_log(self):
-        """[throws each of the model parameters into the log]
-        """
-        for param in self.model.named_parameters():
-
-            self.writer.add_histogram(param[0], param[1])
-            try:
-                self.writer.add_histogram(
-                    "Gradient_of_{}".format(param[0]), param[1].grad
-                )
-            except NotImplementedError:
-                logger.debug("Missing Gradient for {}".format(param[0]))
-
-    def training_loop(self, epochs: int):
-        """[runs learner over batchs and epochs.]
-
-        Args:
-            epochs (int): [number of epochs]
-
-        Returns:
-            [None]: [None]
-        """
-        for current_epoch in range(epochs):
-            log_grads = True
-            for batch in self.train_data:
-                training_batch_loss = self.training_step(batch, log_grads)
-                log_grads = False
-
-            # perform tensorboard logging.
-            self.writer.add_scalar(
-                "Training_Loss", training_batch_loss, current_epoch
+        # Get embedding Layer sizes based on unique categories.
+        # Potential bug if rare classes don't appear in the training set.
+        for key in rossman.cat_vars:
+            embedding_sizes.append(
+                max([len(train_data_obj.data[key].unique()), 2])
             )
-            self.writer.add_scalar(
-                "learning_rate",
-                self.optim.param_groups[0]["lr"],
-                current_epoch,
-            )
-            self.validation_set(current_epoch)
-            if (
-                self.schedule._step_count * 2 % self.cosine_annealing_period
-                == 0
-            ):
-                self.initialize_optimizer()
-
-            logger.debug("epoch: {}".format(current_epoch))
-        # do logging of results.
-        self.dump_hyperparameters_to_log(current_epoch)
-        return None
-
-    def dump_hyperparameters_to_log(self, current_epoch):
-        self.hyperparameters["hparam/current_epoch"] = current_epoch
-        self.hyperparameters["hparam/best_epoch"] = self.best_epoch
-        self.hyperparameters["hparam/batch_size"] = self.batch_size
-        self.writer.add_hparams(
-            hparam_dict=self.hyperparameters,
-            metric_dict={
-                "hparam/validation_error": self.best_validation_error
-            },
-        )
-        return None
-
-    def validation_set(self, current_epoch: int):
-        """[runs forward over validation set with extra logging]
-
-        Args:
-            current_epoch (int): [current epoch for logging purposes]
-
-        Returns:
-            [None]: [None]
-        """
-        losses = []
-        self.model.eval()
-        for batch in self.valid_data:
-            predictions = self.model.forward(
-                batch[0].to(self.device), batch[1].to(self.device)
-            )
-
-            # batch_loss = self.exp_rmspe(
-            #     predictions[:, 0], batch[2][:, 0].to(self.device), log=True
-            # )
-
-            batch_loss = self.loss(
-                predictions[:, 0], batch[2][:, 0].to(self.device)
-            )
-            losses.append(batch_loss)
-        current_validation_error = torch.stack(losses).mean()
-
-        if (
-            not self.best_validation_error
-            or self.best_validation_error > current_validation_error
-        ):
-            self.best_validation_error = current_validation_error
-            self.best_epoch = current_epoch
-
-        self.writer.add_scalar(
-            "Validation_Loss", torch.stack(losses).mean(), current_epoch
-        )
-        self.model.train()
-        return None
-
-
-def get_embedding_sizes(train_data_obj: RossmanDataset) -> List[int]:
-    """[Small helper function just to find the cardinality
-    of each categorical variable]
-
-    Args:
-        train_data_obj (RossmanDataset): [training data object]
-
-    Returns:
-        List[int]: [results list of cardinalities]
-    """
-    embedding_sizes = []
-
-    # Get embedding Layer sizes based on unique categories.
-    # Potential bug if rare classes don't appear in the training set.
-    for key in rossman.cat_vars:
-        embedding_sizes.append(
-            max([len(train_data_obj.data[key].unique()), 2])
-        )
-    return embedding_sizes
+        return embedding_sizes
 
 
 if __name__ == "__main__":
@@ -395,9 +385,6 @@ if __name__ == "__main__":
     # Open data objects
     train_data_obj = RossmanDataset.from_pickle("./data/train_data.pkl")
     valid_data_obj = RossmanDataset.from_pickle("./data/valid_data.pkl")
-
-    # get the cardinality of each categorical variable.
-    embedding_sizes = get_embedding_sizes(train_data_obj)
 
     # Hyperparameter Search Range
     batch_size = [100000]  # Maxes out the ram
