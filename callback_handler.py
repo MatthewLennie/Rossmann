@@ -5,6 +5,7 @@ import torch
 from import_rossman_data import RossmanDataset
 import coloredlogs
 import logging
+import math
 
 
 class CallBack:
@@ -21,6 +22,7 @@ class CallBack:
 class LRSchedulerCallBack(CallBack):
     _order = 1
     # todo LR
+
     def model_set_up(self):
         pass
 
@@ -38,7 +40,7 @@ class TestValidSwitcherCallBack(CallBack):
 
 
 class GPUHandlingCallBacks(CallBack):
-    _order = 10
+    _order = 1
 
     def model_set_up(self):
         # transfer everything to the device
@@ -63,6 +65,26 @@ class GPUHandlingCallBacks(CallBack):
 
 
 class OptimizerCallBack(CallBack):
+    def cosine_annealing(self, pos):
+        pos = pos % 0.25
+        peak = 0.1
+        start = 0.0001
+        end = 0.01
+
+        if pos <= peak:
+            return (
+                start
+                + (1 + math.cos(math.pi * (1 - pos * 4))) * (end - start) / 2
+            )
+        else:
+            end2 = 0.0001
+            return (
+                end
+                + (1 + math.cos(math.pi * (1 - 4 * pos + peak * 4)))
+                * (end2 - end)
+                / 2
+            )
+
     def model_set_up(self):
         # optimizer
         self.run.learner.loss = torch.nn.MSELoss()
@@ -76,6 +98,11 @@ class OptimizerCallBack(CallBack):
         # self.schedule = torch.optim.lr_scheduler.CosineAnnealingLR(
         #     self.optim, T_max=self.cosine_annealing_period
         # )
+
+    def before_forward(self):
+        new_lr = self.cosine_annealing(self.epoch_fraction)
+        for param_group in self.run.learner.optim.param_groups:
+            param_group["lr"] = new_lr
 
 
 class TensorBoardLogCallBack(CallBack):
@@ -100,16 +127,17 @@ class TensorBoardLogCallBack(CallBack):
         self.hyperparameters["dropout"] = self.dropout
 
     def after_train_epoch(self):
-        print("hello")
         self.writer.add_scalar("Training_Loss", self.train_loss, self.epoch)
+        self.writer.add_scalar(
+            "lr", self.learner.optim.param_groups[0]["lr"], self.epoch
+        )
 
     def after_validation(self):
-        print("validation ")
         self.writer.add_scalar("Validation_Loss", self.valid_loss, self.epoch)
 
 
 class Runner:
-    def __init__(self, learner, cbs=[]):
+    def __init__(self, learner: rt.Learner, cbs: CallBack = []):
         self.cbs = sorted(cbs, key=lambda k: k._order)
         self.init_cbs()
         self.epoch = 0
@@ -122,13 +150,15 @@ class Runner:
         for cb in self.cbs:
             cb.set_runner(self)
 
-    def __call__(self, name):
+    def __call__(self, name: str):
         for cb in self.cbs:
             current_func = getattr(cb, name, None)
             if current_func and current_func():
                 return True
 
-    def do_batch(self, cat, cont, yb):
+    def do_batch(
+        self, cat: torch.tensor, cont: torch.tensor, yb: torch.tensor
+    ):
         self.cat = cat
         self.cont = cont
         del cat, cont
@@ -154,7 +184,7 @@ class Runner:
 
         return batch_loss
 
-    def do_all_batches(self, dataloader):
+    def do_all_batches(self, dataloader: torch.utils.data.dataloader):
         epoch_loss = 0
         data_sizes = 0
         for cat, cont, yb in dataloader:
@@ -163,11 +193,12 @@ class Runner:
             data_sizes += yb.shape[0]
         return epoch_loss / data_sizes
 
-    def fit(self, epochs):
+    def fit(self, epochs: int):
         if self("before_train"):
             return
         for epoch in range(epochs):
             self.epoch = epoch
+            self.epoch_fraction = float(epoch) / float(epochs)
             print("epoch: {}".format(epoch))
             if self("before_epoch"):
                 return
@@ -208,4 +239,4 @@ if __name__ == "__main__":
     cb4 = TensorBoardLogCallBack()
     cb5 = OptimizerCallBack()
     example_runner = Runner(rossman_learner, [cb1, cb2, cb3, cb4, cb5])
-    example_runner.fit(40)
+    example_runner.fit(100)
