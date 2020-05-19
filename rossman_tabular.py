@@ -26,7 +26,7 @@ class TabularRossmanModel(torch.nn.Module):
         embedding_depths: List[int],
         layer_sizes: List[int],
         dropout: float,
-        writer: torch.utils.tensorboard.writer,
+        # writer: torch.utils.tensorboard.writer,
     ):
         """[Sets up the network. Has Categorical embeddings for
         categorical input and simple input for linear layers]
@@ -46,7 +46,7 @@ class TabularRossmanModel(torch.nn.Module):
         """
         super(TabularRossmanModel, self).__init__()
 
-        self.writer = writer
+        # self.writer = writer
 
         # build embeddings for categories
         self.CategoricalEmbeddings = []
@@ -100,10 +100,10 @@ class TabularRossmanModel(torch.nn.Module):
         # inp ->   Dropout(BatchNorm1(ReLU(linear(inp))))
         x = torch.cat([cat_outputs, cont_data], 1)
         for layer_num, layer in enumerate(self.linear_layers):
-            if self.put_activations_into_tensorboard:
-                self.writer.add_histogram(
-                    "activations/Layer_{}".format(layer_num), x
-                )
+            # if self.put_activations_into_tensorboard:
+            #     self.writer.add_histogram(
+            #         "activations/Layer_{}".format(layer_num), x
+            #     )
             x = layer(x)
 
             # check for nans. Done this way to prevent mem leak
@@ -138,7 +138,6 @@ class Learner:
         Returns:
             [learner]: [learner object]
         """
-        self.writer = SummaryWriter("runs/{}".format(random.randint(0, 1e9)))
 
         # data loaders
         # Don't do like this with a large dataset if you are going
@@ -149,6 +148,7 @@ class Learner:
         self.load_data(train_data_obj, valid_data_obj, self.batch_size)
 
         self.build_model(layer_sizes, dropout)
+        # self.initialize_optimizer()
 
     def build_model(self, layer_sizes, dropout):
 
@@ -169,7 +169,7 @@ class Learner:
             embedding_depths,
             layer_sizes,
             dropout,
-            self.writer,
+            # self.writer,
         )
 
         return None
@@ -193,8 +193,8 @@ class Learner:
 
         # optimizer
         self.loss = torch.nn.MSELoss()
-        self.cosine_annealing_period = cosine_annealing_period
-        self.lr = lr
+        self.cosine_annealing_period = 10
+        self.lr = 0.05
         self.betas = tuple(betas)  # for adam.
         self.initialize_optimizer()
         self.optim = torch.optim.Adam(

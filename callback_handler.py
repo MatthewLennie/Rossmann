@@ -1,3 +1,5 @@
+import random
+from torch.utils.tensorboard import SummaryWriter
 import rossman_tabular as rt
 import torch
 from import_rossman_data import RossmanDataset
@@ -28,10 +30,11 @@ class TestValidSwitcherCallBack(CallBack):
 
     def after_train_epoch(self):
         # TODO
-        pass
-
-    def after_optim(self):
+        self.run.learner.model.eval()
         self.learner.optim.zero_grad()
+
+    def after_validation(self):
+        self.run.learner.model.train()
 
 
 class GPUHandlingCallBacks(CallBack):
@@ -42,19 +45,37 @@ class GPUHandlingCallBacks(CallBack):
         self.device = torch.device(
             "cuda:0" if torch.cuda.is_available() else "cpu"
         )
-        self.learner.model.to(self.device)
+        self.learner.model = self.learner.model.to(self.device)
+        # print("send to GPU")
 
     def before_forward(self):
-        self.cat = self.cat.to(self.device)
-        self.cont = self.cont.to(self.device)
+        self.run.cat = self.cat.to(self.device)
+        self.run.cont = self.cont.to(self.device)
+        # print("cat on:{}".format(self.cat.device))
 
     def after_forward(self):
-        del self.cat
-        del self.cont
-        self.yb = self.yb[2][:, 0].to(self.device)
+        del self.run.cat
+        del self.run.cont
+        self.run.yb = self.yb[:, 0].to(self.device)
 
     def after_losses(self):
-        del self.yb
+        del self.run.yb
+
+
+class OptimizerCallBack(CallBack):
+    def model_set_up(self):
+        # optimizer
+        self.run.learner.loss = torch.nn.MSELoss()
+        print("loss set")
+        self.cosine_annealing_period = 10
+        self.lr = 0.005
+        self.betas = tuple([0.9, 0.99])  # for adam.
+        self.run.learner.optim = torch.optim.Adam(
+            self.run.learner.model.parameters(), lr=self.lr, betas=self.betas
+        )
+        # self.schedule = torch.optim.lr_scheduler.CosineAnnealingLR(
+        #     self.optim, T_max=self.cosine_annealing_period
+        # )
 
 
 class TensorBoardLogCallBack(CallBack):
@@ -66,6 +87,8 @@ class TensorBoardLogCallBack(CallBack):
     # For recording best validation error in tensorboard
     best_validation_error = None
 
+    writer = SummaryWriter("runs/{}".format(random.randint(0, 1e9)))
+
     def model_set_upTODO(self):
         # hyperparameter logging.
         self.hyperparameters = {}
@@ -76,6 +99,14 @@ class TensorBoardLogCallBack(CallBack):
         self.hyperparameters["hparam/current_epoch"] = 0
         self.hyperparameters["dropout"] = self.dropout
 
+    def after_train_epoch(self):
+        print("hello")
+        self.writer.add_scalar("Training_Loss", self.train_loss, self.epoch)
+
+    def after_validation(self):
+        print("validation ")
+        self.writer.add_scalar("Validation_Loss", self.valid_loss, self.epoch)
+
 
 class Runner:
     def __init__(self, learner, cbs=[]):
@@ -83,6 +114,7 @@ class Runner:
         self.init_cbs()
         self.epoch = 0
         self.learner = learner
+
         if self("model_set_up"):
             return
 
@@ -99,20 +131,21 @@ class Runner:
     def do_batch(self, cat, cont, yb):
         self.cat = cat
         self.cont = cont
+        del cat, cont
         self.yb = yb
         if self("before_forward"):
             return
 
-        predictions = self.learn.model.forward(cat, cont)
+        predictions = self.learner.model.forward(self.cat, self.cont)
         if self("after_forward"):
             return
 
-        batch_loss = self.learn.loss(predictions[:, 0], yb)
+        batch_loss = self.learner.loss(predictions[:, 0], self.yb)
         if self("after_losses"):
             return batch_loss
 
         batch_loss.backward()
-        if self("after_losses"):
+        if self("after_backward"):
             return batch_loss
 
         self.learner.optim.step()
@@ -122,20 +155,27 @@ class Runner:
         return batch_loss
 
     def do_all_batches(self, dataloader):
+        epoch_loss = 0
+        data_sizes = 0
         for cat, cont, yb in dataloader:
-            self.do_batch(cat, cont, yb)
+            loss = self.do_batch(cat, cont, yb)
+            epoch_loss += loss * yb.shape[0]
+            data_sizes += yb.shape[0]
+        return epoch_loss / data_sizes
 
     def fit(self, epochs):
         if self("before_train"):
             return
         for epoch in range(epochs):
+            self.epoch = epoch
+            print("epoch: {}".format(epoch))
             if self("before_epoch"):
                 return
-            self.do_all_batches(self.learner.train_dataloader)
-            if not self("after_train_epoch"):
+            self.train_loss = self.do_all_batches(self.learner.train_data)
+            if self("after_train_epoch"):
                 return
-            self.do_all_batches(self.learner.valid_dataloader)
-            if not self("after_validation"):
+            self.valid_loss = self.do_all_batches(self.learner.valid_data)
+            if self("after_validation"):
                 return
 
 
@@ -157,7 +197,7 @@ if __name__ == "__main__":
         valid_data_obj,
         10,
         0.01,
-        10000,
+        150000,
         [100, 10],
         0.4,
         [0.9, 0.99],
@@ -166,5 +206,6 @@ if __name__ == "__main__":
     cb2 = TestValidSwitcherCallBack()
     cb3 = GPUHandlingCallBacks()
     cb4 = TensorBoardLogCallBack()
-    example_runner = Runner(rossman_learner, [cb1, cb2, cb3, cb4])
-    print("sdf")
+    cb5 = OptimizerCallBack()
+    example_runner = Runner(rossman_learner, [cb1, cb2, cb3, cb4, cb5])
+    example_runner.fit(40)
