@@ -20,7 +20,7 @@ activations can added to the tensorboard with learner.model.put_activations_into
 - htop for watching resources
 - train from TMUX on server so that ssh dropouts doesn't interrupt training
 - Make sure to put model into eval mode when you have dropout to avoid using dropout on validation set. 
-
+- Standard pytorch data loader not optimized for structured data because it fetches each example seperately and then concatenates. This is fine when each sample has megapixel number of features and batch sizes are ~100. When batch sizes are 100k+, this implementation causes the CPU to throttle the GPU by reading the data so slowly
 ## Things to improve in next project:
 - Better data visualization
 - LRFinder
@@ -40,4 +40,5 @@ Validation Error: 0.000094297 MSE (note I am not comparing to the Percentage MSE
 - layers:[248, 60, 60, 40, 30, 20, 10, 2], 
 - dropout:0.4,
 - momentum: [0.8, 0.99]
+
 

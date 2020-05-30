@@ -16,6 +16,4 @@ Things to check
     - Momentum -  NEED TO DO.
     - Dropout - 0.8 results in really unstable training. Just too much. 
 - LR Finder
-- Is batch norm implemented as it is intended to be 
-- is faster with memory async
-- renormalization
+- Is batch norm implemented as it is intended to be. 

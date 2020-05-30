@@ -197,7 +197,7 @@ class RossmanDataset(Dataset):
             pickle_file {[str]} -- [file name of pickled Rossmann Dataset.]
         """
         with open(pickle_file, "rb") as input:
-            file = pickle.load(input)
+            file = pickle.load(input, fix_imports=True)
         return file
 
     def to_pickle(self, output_file: str):
@@ -264,6 +264,7 @@ class RossmanDataset(Dataset):
         )
         self.length = self.data.shape[0]
 
+    # @profile
     def __getitem__(self, index):
         # returns the input and output
         return (
@@ -276,7 +277,7 @@ class RossmanDataset(Dataset):
         return self.length  # of how many examples(images?) you have
 
 
-if __name__ == "__main__":
+def main():
 
     # Example usage
     # just used the joined dataframes
@@ -307,3 +308,10 @@ if __name__ == "__main__":
         joined, cont_vars, cat_vars, valid.indices, scaler=train_data.scaler
     )
     valid_data.to_pickle("./data/valid_data.pkl")
+
+
+if __name__ == "__main__":
+    print(
+        "Run this through external call not through main due to pickle context"
+    )
+

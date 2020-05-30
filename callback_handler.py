@@ -50,15 +50,17 @@ class GPUHandlingCallBacks(CallBack):
         self.learner.model = self.learner.model.to(self.device)
         # print("send to GPU")
 
+    # @profile
     def before_forward(self):
-        self.run.cat = self.cat.to(self.device)
-        self.run.cont = self.cont.to(self.device)
+
+        self.run.cat = self.cat.to(self.device, non_blocking=True)
+        self.run.cont = self.cont.to(self.device, non_blocking=True)
+        self.run.yb = self.yb[:, 0].to(self.device, non_blocking=True)
         # print("cat on:{}".format(self.cat.device))
 
     def after_forward(self):
         del self.run.cat
         del self.run.cont
-        self.run.yb = self.yb[:, 0].to(self.device)
 
     def after_losses(self):
         del self.run.yb
@@ -112,9 +114,9 @@ class TensorBoardLogCallBack(CallBack):
     # TODO - record train and validation errors
 
     # For recording best validation error in tensorboard
-    best_validation_error = None
+    best_validation_error: float = None
 
-    writer = SummaryWriter("runs/{}".format(random.randint(0, 1e9)))
+    writer = SummaryWriter("runs/{}".format(random.randint(0, int(1e9))))
 
     def model_set_upTODO(self):
         # hyperparameter logging.
@@ -184,6 +186,7 @@ class Runner:
 
         return batch_loss
 
+    # @profile
     def do_all_batches(self, dataloader: torch.utils.data.dataloader):
         epoch_loss = 0
         data_sizes = 0
@@ -210,17 +213,18 @@ class Runner:
                 return
 
 
-if __name__ == "__main__":
-    # example_runner.learn()
-    # print(example_runner.epoch)
-    print("blah")
+def main():
     # Logging settings
     coloredlogs.install(level="DEBUG")
     logger = logging.getLogger(__name__)
 
     # Open data objects
-    train_data_obj = RossmanDataset.from_pickle("./data/train_data.pkl")
-    valid_data_obj = RossmanDataset.from_pickle("./data/valid_data.pkl")
+    train_data_obj: RossmanDataset = RossmanDataset.from_pickle(
+        "./data/train_data.pkl"
+    )
+    valid_data_obj: RossmanDataset = RossmanDataset.from_pickle(
+        "./data/valid_data.pkl"
+    )
 
     # build and train model
     rossman_learner = rt.Learner(
@@ -239,4 +243,8 @@ if __name__ == "__main__":
     cb4 = TensorBoardLogCallBack()
     cb5 = OptimizerCallBack()
     example_runner = Runner(rossman_learner, [cb1, cb2, cb3, cb4, cb5])
-    example_runner.fit(100)
+    example_runner.fit(60)
+
+
+# if __name__ == "__main__":
+#     main()
