@@ -188,25 +188,8 @@ class Learner:
             shuffle=True,
         )
 
-        del self.train_data_obj.data
-        del self.valid_data_obj.data
-
-    def initialize_optimizer(self):
-        """[creates a clean optimizer and scheduler.
-        Can by improved by providing resetting functionality, works for now]
-        """
-        # For recording best validation error in tensorboard
-        self.best_validation_error = None
-
-        # optimizer
-        self.loss = torch.nn.MSELoss()
-        self.cosine_annealing_period = 10
-        self.lr = 0.05
-        self.betas = tuple(betas)  # for adam.
-        self.initialize_optimizer()
-        self.optim = torch.optim.Adam(
-            self.model.parameters(), lr=self.lr, betas=self.betas
-        )
+        # del self.train_data_obj.data
+        # del self.valid_data_obj.data
 
     def get_embedding_sizes(self, train_data_obj: RossmanDataset) -> List[int]:
         """[Small helper function just to find the cardinality

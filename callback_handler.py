@@ -1,4 +1,5 @@
 import random
+from typing import List
 from torch.utils.tensorboard import SummaryWriter
 import rossman_tabular as rt
 import torch
@@ -6,6 +7,7 @@ from import_rossman_data import RossmanDataset
 import coloredlogs
 import logging
 import math
+from FastTensorDataLoader import FastTensorDataLoader
 
 
 class CallBack:
@@ -28,21 +30,30 @@ class LRSchedulerCallBack(CallBack):
 
 
 class TestValidSwitcherCallBack(CallBack):
-    _order = 2
+    _order = 55
 
     def after_train_epoch(self):
         # TODO
         self.run.learner.model.eval()
         self.learner.optim.zero_grad()
+        self.run.training_mode = False
+        print("after train epoch")
 
     def after_validation(self):
         self.run.learner.model.train()
+        self.run.training_mode = True
+
+    def after_losses(self):
+        if not self.training_mode:
+            return True
 
 
 class GPUHandlingCallBacks(CallBack):
     _order = 1
 
     def model_set_up(self):
+
+        torch.cuda.empty_cache()
         # transfer everything to the device
         self.device = torch.device(
             "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -61,62 +72,87 @@ class GPUHandlingCallBacks(CallBack):
     def after_forward(self):
         del self.run.cat
         del self.run.cont
+        # useful bit of code for debugging memory leaks.
+        # import gc
+
+        # for obj in gc.get_objects():
+        #     try:
+        #         if torch.is_tensor(obj) or (
+        #             hasattr(obj, "data") and torch.is_tensor(obj.data)
+        #         ):
+        #             print(type(obj), obj.size(), obj.device)
+        #     except:
+        #         pass
 
     def after_losses(self):
+        print("deleting losses during training? {}".format(self.training_mode))
         del self.run.yb
+
+    def after_validation(self):
+        del self.run.train_loss
+        del self.run.valid_loss
+
+        # Not sure the source of the problem but this stops the accumulation of the activations/
+        torch.cuda.empty_cache()
 
 
 class OptimizerCallBack(CallBack):
-    def cosine_annealing(self, pos):
-        pos = pos % 0.25
-        peak = 0.1
-        start = 0.0001
-        end = 0.01
+    _order = 3
 
-        if pos <= peak:
+    def __init__(self, cosine_annealing_period, lr, betas):
+        super().__init__()
+        self.cosine_annealing_period = cosine_annealing_period
+        self.lr = lr
+        self.betas = betas
+
+    def cosine_annealing(self, pos):
+        relative_pos = pos % self.cosine_annealing_period
+        peak = 0.3 * self.cosine_annealing_period
+        start = 0.00001
+
+        if relative_pos <= peak:
             return (
                 start
-                + (1 + math.cos(math.pi * (1 - pos * 4))) * (end - start) / 2
+                + (1 - math.cos(math.pi * relative_pos * 0.5 / peak)) * self.lr
             )
         else:
-            end2 = 0.0001
-            return (
-                end
-                + (1 + math.cos(math.pi * (1 - 4 * pos + peak * 4)))
-                * (end2 - end)
-                / 2
+
+            return self.lr * (
+                1
+                + math.cos(math.pi * (relative_pos - peak) * 0.5 / (1 - peak))
             )
 
     def model_set_up(self):
-        # optimizer
+
         self.run.learner.loss = torch.nn.MSELoss()
-        print("loss set")
-        self.cosine_annealing_period = 10
-        self.lr = 0.005
-        self.betas = tuple([0.9, 0.99])  # for adam.
+
+        # optimizer
         self.run.learner.optim = torch.optim.Adam(
             self.run.learner.model.parameters(), lr=self.lr, betas=self.betas
         )
-        # self.schedule = torch.optim.lr_scheduler.CosineAnnealingLR(
-        #     self.optim, T_max=self.cosine_annealing_period
-        # )
 
     def before_forward(self):
-        new_lr = self.cosine_annealing(self.epoch_fraction)
+        new_lr = self.cosine_annealing(self.epoch)
         for param_group in self.run.learner.optim.param_groups:
             param_group["lr"] = new_lr
 
+    def after_optim(self):
+        self.epoch += 1 / self.batches
+
 
 class TensorBoardLogCallBack(CallBack):
-    _order = 4
+    _order = 0
     # TODO - record best validation parameters
     # TODO - record hyperparams
     # TODO - record train and validation errors
+    def __init__(self):
+        super().__init__()
+        # For recording best validation error in tensorboard
+        self.best_validation_error: float = None
 
-    # For recording best validation error in tensorboard
-    best_validation_error: float = None
-
-    writer = SummaryWriter("runs/{}".format(random.randint(0, int(1e9))))
+        self.writer = SummaryWriter(
+            "runs/{}".format(random.randint(0, int(1e9)))
+        )
 
     def model_set_upTODO(self):
         # hyperparameter logging.
@@ -139,12 +175,12 @@ class TensorBoardLogCallBack(CallBack):
 
 
 class Runner:
-    def __init__(self, learner: rt.Learner, cbs: CallBack = []):
+    def __init__(self, learner: rt.Learner, cbs: List[CallBack] = []):
         self.cbs = sorted(cbs, key=lambda k: k._order)
         self.init_cbs()
         self.epoch = 0
         self.learner = learner
-
+        self.training_mode = True
         if self("model_set_up"):
             return
 
@@ -187,13 +223,15 @@ class Runner:
         return batch_loss
 
     # @profile
-    def do_all_batches(self, dataloader: torch.utils.data.dataloader):
+    def do_all_batches(self, dataloader: FastTensorDataLoader):
         epoch_loss = 0
         data_sizes = 0
+        self.batches = len(dataloader)
         for cat, cont, yb in dataloader:
             loss = self.do_batch(cat, cont, yb)
             epoch_loss += loss * yb.shape[0]
             data_sizes += yb.shape[0]
+
         return epoch_loss / data_sizes
 
     def fit(self, epochs: int):
@@ -202,7 +240,7 @@ class Runner:
         for epoch in range(epochs):
             self.epoch = epoch
             self.epoch_fraction = float(epoch) / float(epochs)
-            print("epoch: {}".format(epoch))
+
             if self("before_epoch"):
                 return
             self.train_loss = self.do_all_batches(self.learner.train_data)
