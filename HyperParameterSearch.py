@@ -40,6 +40,7 @@ def setup_run(
         dropout (int): [description]
         betas (List[int]): [description]
     """
+
     # build and train model
     rossman_learner = rt.Learner(
         train_data_obj,

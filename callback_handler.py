@@ -17,6 +17,7 @@ class CallBack:
         self.run = run
 
     # gives access to the scope of the runner.
+    # Do not repeat this pattern in future, it tends to generate nasty bugs
     def __getattr__(self, k):
         return getattr(self.run, k)
 
@@ -30,26 +31,30 @@ class LRSchedulerCallBack(CallBack):
 
 
 class TestValidSwitcherCallBack(CallBack):
+    # Handles switches between Training and validation
+
     _order = 55
 
     def after_train_epoch(self):
-        # TODO
         self.run.learner.model.eval()
         self.learner.optim.zero_grad()
         self.run.training_mode = False
-        print("after train epoch")
 
     def after_validation(self):
         self.run.learner.model.train()
         self.run.training_mode = True
 
     def after_losses(self):
+        # exits before backward when in validation mode
         if not self.training_mode:
             return True
 
 
 class GPUHandlingCallBacks(CallBack):
     _order = 1
+    # handles data transfer to device and also deletes the tensors
+    # note the torch.cuda.empty_cache seem nessecary to stop any
+    # garbage collection problems.
 
     def model_set_up(self):
 
@@ -59,7 +64,6 @@ class GPUHandlingCallBacks(CallBack):
             "cuda:0" if torch.cuda.is_available() else "cpu"
         )
         self.learner.model = self.learner.model.to(self.device)
-        # print("send to GPU")
 
     # @profile
     def before_forward(self):
@@ -85,7 +89,6 @@ class GPUHandlingCallBacks(CallBack):
         #         pass
 
     def after_losses(self):
-        print("deleting losses during training? {}".format(self.training_mode))
         del self.run.yb
 
     def after_validation(self):
@@ -282,7 +285,3 @@ def main():
     cb5 = OptimizerCallBack()
     example_runner = Runner(rossman_learner, [cb1, cb2, cb3, cb4, cb5])
     example_runner.fit(60)
-
-
-# if __name__ == "__main__":
-#     main()
