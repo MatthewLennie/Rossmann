@@ -16,6 +16,7 @@ import logging
 import numpy as np
 from typing import List, Tuple
 import torch.cuda.profiler as profiler
+import matplotlib.pyplot as plt
 
 
 def setup_run(
@@ -60,7 +61,9 @@ def setup_run(
         cosine_annealing_period, lr, betas
     )
     example_runner: Runner = Runner(rossman_learner, [cb1, cb2, cb3, cb4, cb5])
-    example_runner.fit(600)
+    example_runner.fit(1)
+    plt.plot(cb4.lr)
+    plt.gcf().savefig("lr.png")
     del example_runner
     del cb1, cb2, cb3, cb4, cb5
 
@@ -76,7 +79,6 @@ valid_data_obj: RossmanDataset = RossmanDataset.from_pickle(
     "./data/valid_data.pkl"
 )
 
-
 # import_rossman_data.main()
 # with torch.autograd.profiler.emit_nvtx():
 # callback_handler.main()  # sets up a hyperparameter search of the model
@@ -87,19 +89,21 @@ logger = logging.getLogger(__name__)
 
 # Hyperparameter Search Range
 batch_size: List[int] = [250000]  # Maxes out the ram
-cosine_annealing_period: List[int] = [10, 5]
+cosine_annealing_period: List[int] = [40, 5]
 layer_sizes: List[List[int]] = [
     # [240, 1000, 50],  # <- Jeremy used this one in the course.
     # [240, 1000, 250, 50],
     [240, 150, 80, 40, 10],
     [60, 60, 40, 30, 20, 10],  # <-This one ended up worked well
 ]
-lr: List[float] = [0.001, 0.0005]
+# lr: List[float] = [0.01, 0.0005]
+lr: List[float] = [0.01]
 dropout: List[float] = [0.1, 0.3, 0.4]
 betas: List[List[float]] = [
     [0.9, 0.999],  # The normal default
     [0.99, 0.9999],
     [0.999, 0.99999],
+    [0.99999, 0.999999],
     [0.8, 0.99],
 ]
 

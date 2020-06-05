@@ -8,6 +8,10 @@ import coloredlogs
 import logging
 import math
 from FastTensorDataLoader import FastTensorDataLoader
+import re
+from collections import defaultdict
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 class CallBack:
@@ -110,19 +114,22 @@ class OptimizerCallBack(CallBack):
 
     def cosine_annealing(self, pos):
         relative_pos = pos % self.cosine_annealing_period
-        peak = 0.3 * self.cosine_annealing_period
-        start = 0.00001
+        peak = 0.6 * self.cosine_annealing_period
+        start = 0.0000001
 
         if relative_pos <= peak:
             return (
-                start
-                + (1 - math.cos(math.pi * relative_pos * 0.5 / peak)) * self.lr
+                start + (1 - math.cos(math.pi * relative_pos / peak)) * self.lr
             )
         else:
 
             return self.lr * (
                 1
-                + math.cos(math.pi * (relative_pos - peak) * 0.5 / (1 - peak))
+                + math.cos(
+                    math.pi
+                    * (relative_pos - peak)
+                    / (self.cosine_annealing_period - peak)
+                )
             )
 
     def model_set_up(self):
@@ -140,7 +147,7 @@ class OptimizerCallBack(CallBack):
             param_group["lr"] = new_lr
 
     def after_optim(self):
-        self.epoch += 1 / self.batches
+        self.run.epoch += 1 / self.batches
 
 
 class TensorBoardLogCallBack(CallBack):
@@ -156,6 +163,45 @@ class TensorBoardLogCallBack(CallBack):
         self.writer = SummaryWriter(
             "runs/{}".format(random.randint(0, int(1e9)))
         )
+        self.lr = []
+        self.hists = defaultdict(list)
+
+    def set_runner(self, run):
+        super().set_runner(run)
+        self.get_all_layers(self.run.learner.model)
+
+    def hook_fn(self, name):
+        def _inner(layer_object, input, output):
+            run = self.run
+            # print(name)
+            # self.writer.add_histogram("Mean" + name, output, run.epoch)
+            if run.training_mode:
+                hist = torch.histc(output, 200, -3, 3)
+                self.hists[name].append(hist / hist.sum())
+                del hist
+
+        return _inner
+
+    def torch_hooks_init(self):
+        self.get_all_layers(self.run.learner.mode)
+        return None
+
+    def get_all_layers(self, layer):
+        for name, layer in layer._modules.items():
+            # If it is a sequential, don't register a hook on it
+            # but recursively register hook on all it's module children
+            print(layer)
+            if isinstance(layer, torch.nn.ModuleList):
+                self.get_all_layers(layer)
+            else:
+                # it's a non sequential. Register a hook
+                print("registering {}".format(name))
+                p = re.compile("(^[a-zA-Z]*)")
+                m = p.match(str(layer))
+                layer.register_forward_hook(
+                    self.hook_fn("{}/{}".format(m.group(0), name))
+                )
+        print("hooks registered")
 
     def model_set_upTODO(self):
         # hyperparameter logging.
@@ -167,22 +213,36 @@ class TensorBoardLogCallBack(CallBack):
         self.hyperparameters["hparam/current_epoch"] = 0
         self.hyperparameters["dropout"] = self.dropout
 
-    def after_train_epoch(self):
-        self.writer.add_scalar("Training_Loss", self.train_loss, self.epoch)
+    def after_optim(self):
+        self.lr.append(self.learner.optim.param_groups[0]["lr"])
         self.writer.add_scalar(
             "lr", self.learner.optim.param_groups[0]["lr"], self.epoch
         )
 
+    def after_train_epoch(self):
+        self.writer.add_scalar("Training_Loss", self.train_loss, self.epoch)
+
     def after_validation(self):
         self.writer.add_scalar("Validation_Loss", self.valid_loss, self.epoch)
+
+    def after_fit(self):
+        for key in self.hists:
+            full = torch.stack(self.hists[key])
+            plt.imshow(
+                full.cpu().detach().numpy().transpose(),
+                extent=[0, full.shape[0], -3, 3],
+            )
+            plt.gca().set_yticks(np.linspace(-3, 3, 10))
+            plt.gcf().savefig(key)
+        del self.hists
 
 
 class Runner:
     def __init__(self, learner: rt.Learner, cbs: List[CallBack] = []):
         self.cbs = sorted(cbs, key=lambda k: k._order)
-        self.init_cbs()
         self.epoch = 0
         self.learner = learner
+        self.init_cbs()
         self.training_mode = True
         if self("model_set_up"):
             return
@@ -252,6 +312,8 @@ class Runner:
             self.valid_loss = self.do_all_batches(self.learner.valid_data)
             if self("after_validation"):
                 return
+        if self("after_fit"):
+            return
 
 
 def main():

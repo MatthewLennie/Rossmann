@@ -14,6 +14,24 @@ import numpy as np
 from FastTensorDataLoader import FastTensorDataLoader
 
 
+class GeneralizedReLU(torch.nn.Module):
+    def __init__(self, leak=None, sub=None, maxv=None):
+        super().__init__()
+        self.leak, self.sub, self.maxv = leak, sub, maxv
+
+    def forward(self, x):
+        x = (
+            torch.nn.functional.leaky_relu(x, self.leak)
+            if self.leak is not None
+            else torch.nn.functional.relu(x)
+        )
+        if self.sub is not None:
+            x.sub_(self.sub)
+        if self.maxv is not None:
+            x.clamp_max_(self.maxv)
+        return x
+
+
 class TabularRossmanModel(torch.nn.Module):
     """[model class for rossman model, tabular style nn]
 
@@ -60,8 +78,10 @@ class TabularRossmanModel(torch.nn.Module):
         self.linear_layers = []
 
         for in_size, out_size in zip(layer_sizes[:-2], (layer_sizes[1:-1])):
-            self.linear_layers.append(torch.nn.Linear(in_size, out_size))
-            self.linear_layers.append(torch.nn.ReLU())
+            self.linear_layers.append(
+                torch.nn.Linear(in_size, out_size, bias=False)
+            )
+            self.linear_layers.append(GeneralizedReLU(0.1, 0.4))
             self.linear_layers.append(torch.nn.BatchNorm1d(out_size))
             self.linear_layers.append(torch.nn.Dropout(p=dropout))
 
